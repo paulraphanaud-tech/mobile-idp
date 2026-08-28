@@ -1,0 +1,15 @@
+# S3 auth: use access keys (not SSO) to avoid "Token is invalid and failed to refresh".
+# Set before running: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_REGION.
+
+ENV["AWS_REGION"] = "{{AWS_REGION}}" if ENV["AWS_REGION"].to_s.empty?
+
+s3_bucket(ENV["MATCH_S3_BUCKET"] || "{{PROJECT_NAME}}-match")
+s3_region(ENV["AWS_REGION"] || "{{AWS_REGION}}")
+
+storage_mode("s3")
+
+type("development") # The default type, can be: appstore, adhoc, enterprise or development
+
+team_id(ENV["APPLE_TEAM_ID"] || "{{APPLE_TEAM_ID}}")
+app_identifier([ENV["APP_IDENTIFIER"] || "{{IOS_BUNDLE_ID}}"])
+username(ENV["APPLE_USERNAME"] || "{{APPLE_USERNAME}}")

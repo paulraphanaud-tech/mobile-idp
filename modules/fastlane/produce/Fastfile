@@ -1,0 +1,27 @@
+# =============================================================================
+# Module: Produce
+# Provides: create_app_on_asc(name, language)
+# =============================================================================
+
+def create_app_on_asc(name, language)
+  app_identifier = ENV['APP_IDENTIFIER']
+  app_name = name || ENV['APP_NAME']
+  team_id = ENV['APPLE_TEAM_ID']
+
+  app_store_connect_api_key(
+    key_id: ENV['APP_STORE_CONNECT_KEY_ID'],
+    issuer_id: ENV['APP_STORE_CONNECT_ISSUER_ID'],
+    key_content: ENV['APP_STORE_CONNECT_KEY_CONTENT']
+  )
+
+  produce(
+    app_identifier: app_identifier,
+    app_name: app_name,
+    team_id: team_id,
+    sku: ENV['APP_SKU'] || app_identifier,
+    language: language || "en-US",
+    enable_services: {}
+  )
+
+  UI.message("App '#{app_name}' (#{app_identifier}) created on App Store Connect!")
+end

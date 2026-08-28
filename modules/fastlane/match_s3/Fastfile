@@ -1,0 +1,23 @@
+# =============================================================================
+# Module: Match S3
+# Provides: sync_certificates(cert_type, readonly)
+# =============================================================================
+
+def sync_certificates(cert_type, readonly)
+  app_identifier = ENV['APP_IDENTIFIER']
+  team_id = ENV['APPLE_TEAM_ID']
+  s3_bucket = ENV['MATCH_S3_BUCKET']
+  aws_region = ENV['AWS_REGION'] || 'eu-central-1'
+
+  match(
+    type: cert_type || "development",
+    app_identifier: [app_identifier],
+    team_id: team_id,
+    storage_mode: "s3",
+    s3_bucket: s3_bucket,
+    s3_region: aws_region,
+    readonly: readonly != false
+  )
+
+  UI.message("Certificates synced (type: #{cert_type})!")
+end

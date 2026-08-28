@@ -1,0 +1,58 @@
+version: 0.2
+
+env:
+  variables:
+    FASTLANE_ENV: "dev"
+    TARGET: "app_distrib"
+    BUMP: "patch"
+    MATCH_S3_BUCKET: "{{PROJECT_NAME}}-match"
+    FL_AWS_REGION: "{{AWS_REGION}}"
+  secrets-manager:
+    FLAVOR: "dev/secret/fastlane:FLAVOR"
+    SCHEME: "dev/secret/fastlane:SCHEME"
+    FIREBASE_APP_IOS: "dev/secret/fastlane:FIREBASE_APP_IOS"
+    APP_STORE_TESTER_GROUP: "dev/secret/fastlane:APP_STORE_TESTER_GROUP"
+    FIREBASE_CLI_TOKEN: "secret/env/fastlane:FIREBASE_CLI_TOKEN"
+    APP_STORE_CONNECT_API_KEY_KEY_ID: "secret/env/fastlane:APP_STORE_CONNECT_KEY_ID"
+    APP_STORE_CONNECT_API_KEY_ISSUER_ID: "secret/env/fastlane:APP_STORE_CONNECT_ISSUER_ID"
+    APP_STORE_CONNECT_API_KEY_KEY: "secret/env/fastlane:APP_STORE_CONNECT_KEY_CONTENT"
+
+phases:
+  install:
+    commands:
+      - gem install bundler
+      - bundle install
+      - |
+        if ! command -v flutter &>/dev/null; then
+          git clone https://github.com/flutter/flutter.git -b stable $HOME/flutter
+          export PATH="$HOME/flutter/bin:$PATH"
+          flutter precache
+        fi
+      - export PATH="$HOME/flutter/bin:$PATH"
+
+  pre_build:
+    commands:
+      - export PATH="$HOME/flutter/bin:$PATH"
+      - flutter --version
+      - export AWS_REGION="${FL_AWS_REGION}"
+
+  build:
+    commands:
+      - export PATH="$HOME/flutter/bin:$PATH"
+      - bundle exec fastlane ios deploy target:${TARGET} bump:${BUMP} --env ${FASTLANE_ENV}
+
+  post_build:
+    commands:
+      - echo "iOS build completed on $(date)"
+      - ls -la build/ios/ipa/ 2>/dev/null || echo "No IPA found"
+
+artifacts:
+  files:
+    - build/ios/ipa/*.ipa
+  discard-paths: yes
+
+cache:
+  paths:
+    - vendor/bundle/**/*
+    - $HOME/flutter/**/*
+    - ios/Pods/**/*

@@ -1,0 +1,45 @@
+# =============================================================================
+# Module: iOS Deploy TestFlight
+# Provides: deploy_ios_to_app_store_connect(version, bump)
+# Requires: ios_build module (build_ios)
+#
+# Required ENV:
+#   APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID
+#   APP_STORE_CONNECT_KEY_CONTENT
+#   APP_IDENTIFIER
+#   FLAVOR
+# =============================================================================
+
+def deploy_ios_to_app_store_connect(version, bump)
+  flavor = ENV['FLAVOR']
+  tester_group = ENV['APP_STORE_TESTER_GROUP']
+  app_identifier = ENV['APP_IDENTIFIER']
+
+  app_store_connect_api_key(
+    key_id: ENV['APP_STORE_CONNECT_KEY_ID'],
+    issuer_id: ENV['APP_STORE_CONNECT_ISSUER_ID'],
+    key_content: ENV['APP_STORE_CONNECT_KEY_CONTENT']
+  )
+
+  app_store_build_number(
+    app_identifier: app_identifier,
+    live: false
+  )
+
+  latest_build_number = lane_context[SharedValues::LATEST_BUILD_NUMBER]
+  latest_version = lane_context[SharedValues::LATEST_VERSION]
+
+  build_ios(version, bump, latest_build_number, latest_version)
+
+  upload_to_testflight(
+    ipa: "build/ios/ipa/app-#{flavor}-release.ipa",
+    skip_waiting_for_build_processing: true,
+    notify_external_testers: false,
+    distribute_external: true,
+    changelog: ENV['RELEASE_NOTES'] || "No changelog",
+    uses_non_exempt_encryption: true,
+    groups: tester_group
+  )
+
+  UI.message("Successfully deployed IPA on App Store Connect!")
+end

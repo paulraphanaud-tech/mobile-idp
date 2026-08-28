@@ -1,0 +1,43 @@
+# =============================================================================
+# Module: iOS Build
+# Provides: update_ios_version, build_ios(version, bump, latest_build_number, latest_version)
+# Requires: common module (prepare_and_check, compute_next_version)
+# =============================================================================
+
+def update_ios_version(version, bump, latest_build_number, latest_version)
+  build_version, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
+
+  increment_build_number(
+    build_number: "#{build_number}",
+    xcodeproj: "./ios/Runner.xcodeproj",
+  )
+
+  increment_version_number(
+    version_number: build_version,
+    xcodeproj: "./ios/Runner.xcodeproj",
+  )
+
+  UI.message("Version updated => #{build_version}(#{build_number})!")
+end
+
+def build_ios(version, bump, latest_build_number, latest_version)
+  flavor = ENV['FLAVOR']
+  scheme = ENV['SCHEME']
+
+  prepare_and_check
+  update_ios_version(version, bump, latest_build_number, latest_version)
+
+  sh("flutter build ios --release --flavor #{flavor} --no-codesign")
+
+  gym(
+    workspace: "./ios/Runner.xcworkspace",
+    configuration: "Release",
+    scheme: scheme,
+    export_method: "app-store",
+    export_options: "./ios/export_options_#{flavor}.plist",
+    output_name: "app-#{flavor}-release.ipa",
+    output_directory: "./build/ios/ipa",
+  )
+
+  UI.message("Successfully built IPA!")
+end

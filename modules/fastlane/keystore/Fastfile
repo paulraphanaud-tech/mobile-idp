@@ -1,0 +1,54 @@
+# =============================================================================
+# Module: Keystore
+# Provides: generate_android_keystore, upload_android_keystore, download_android_keystore
+# =============================================================================
+
+def generate_android_keystore
+  keystore_path = ENV['KEYSTORE_PATH'] || './release-key.jks'
+  key_alias = ENV['KEY_ALIAS']
+  keystore_password = ENV['KEYSTORE_PASSWORD']
+  key_password = ENV['KEY_PASSWORD']
+  validity = ENV['KEYSTORE_VALIDITY'] || '10000'
+
+  cn = ENV['KEYSTORE_CN'] || 'Android Release'
+  ou = ENV['KEYSTORE_OU'] || 'Mobile'
+  o  = ENV['KEYSTORE_O']  || 'Company'
+  l  = ENV['KEYSTORE_L']  || 'Paris'
+  st = ENV['KEYSTORE_ST'] || 'IDF'
+  c  = ENV['KEYSTORE_C']  || 'FR'
+
+  dname = "CN=#{cn}, OU=#{ou}, O=#{o}, L=#{l}, ST=#{st}, C=#{c}"
+
+  sh(
+    "keytool -genkeypair -v " \
+    "-keystore #{keystore_path} " \
+    "-alias #{key_alias} " \
+    "-keyalg RSA -keysize 2048 " \
+    "-validity #{validity} " \
+    "-storepass #{keystore_password} " \
+    "-keypass #{key_password} " \
+    "-dname \"#{dname}\""
+  )
+
+  UI.message("Keystore generated at #{keystore_path}!")
+end
+
+def upload_android_keystore
+  keystore_path = ENV['KEYSTORE_PATH'] || './release-key.jks'
+  bucket = ENV['S3_KEYSTORE_BUCKET']
+  region = ENV['AWS_REGION'] || 'eu-west-1'
+
+  sh("aws s3 cp #{keystore_path} s3://#{bucket}/keystore/release-key.jks --region #{region}")
+
+  UI.message("Keystore uploaded to s3://#{bucket}/keystore/release-key.jks!")
+end
+
+def download_android_keystore
+  keystore_path = ENV['KEYSTORE_PATH'] || '/tmp/release-key.jks'
+  bucket = ENV['S3_KEYSTORE_BUCKET']
+  region = ENV['AWS_REGION'] || 'eu-west-1'
+
+  sh("aws s3 cp s3://#{bucket}/keystore/release-key.jks #{keystore_path} --region #{region}")
+
+  UI.message("Keystore downloaded to #{keystore_path}!")
+end

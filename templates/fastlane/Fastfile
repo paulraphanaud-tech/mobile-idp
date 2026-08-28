@@ -1,0 +1,109 @@
+fastlane_require 'dotenv'
+
+# =============================================================================
+# Environment loading
+# =============================================================================
+before_all do
+  env_name = ENV['FASTLANE_ENV'] || 'dev'
+  env_file = "env.#{env_name}"
+  secret_file = 'env.secret'
+
+  if File.exist?(env_file)
+    Dotenv.overload env_file
+    UI.message("Env loaded from #{env_file}!")
+  else
+    UI.important("Env file #{File.expand_path(env_file)} not found. Assuming vars are in ENV.")
+  end
+
+  if File.exist?(secret_file)
+    Dotenv.overload secret_file
+    UI.message("Secrets loaded from #{secret_file}!")
+  elsif ENV['CI'] || ENV['CODEBUILD_BUILD_ID']
+    UI.important("CI environment detected (AWS CodeBuild). Skipping local secret file load.")
+  else
+    raise "Secret file doesn't exist at #{File.expand_path(secret_file)}"
+  end
+end
+
+default_platform(:ios)
+
+# =============================================================================
+# Import modules (functions only, no lanes)
+# =============================================================================
+import "../{{MODULES_PATH}}/fastlane/common/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/android_build/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/android_deploy_firebase/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/android_deploy_play_store/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_build/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_deploy_firebase/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_deploy_testflight/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/match_s3/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/produce/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/keystore/Fastfile"
+
+# =============================================================================
+# Android lanes
+# =============================================================================
+platform :android do
+  lane :build do |options|
+    build_android(options[:version], options[:bump])
+  end
+
+  lane :build_deploy do |options|
+    deploy_android_to_app_distrib(options[:version], options[:bump])
+  end
+
+  lane :deploy_firebase do |options|
+    deploy_android_to_app_distrib(options[:version], options[:bump])
+  end
+
+  lane :deploy_play_store do |options|
+    deploy_android_to_play_store(options[:version], options[:bump], options[:track])
+  end
+
+  lane :generate_keystore do
+    generate_android_keystore
+  end
+
+  lane :upload_keystore do
+    upload_android_keystore
+  end
+
+  lane :download_keystore do
+    download_android_keystore
+  end
+end
+
+# =============================================================================
+# iOS lanes
+# =============================================================================
+platform :ios do
+  lane :build do |options|
+    build_ios(options[:version], options[:bump], nil, nil)
+  end
+
+  lane :deploy do |options|
+    case options[:target]
+    when "app_distrib"
+      deploy_ios_to_app_distrib(options[:version], options[:bump])
+    else
+      deploy_ios_to_app_store_connect(options[:version], options[:bump])
+    end
+  end
+
+  lane :deploy_firebase do |options|
+    deploy_ios_to_app_distrib(options[:version], options[:bump])
+  end
+
+  lane :deploy_testflight do |options|
+    deploy_ios_to_app_store_connect(options[:version], options[:bump])
+  end
+
+  lane :sync_certs do |options|
+    sync_certificates(options[:type], options[:readonly])
+  end
+
+  lane :create_app do |options|
+    create_app_on_asc(options[:name], options[:language])
+  end
+end

@@ -1,0 +1,36 @@
+# =============================================================================
+# Module: Android Build
+# Provides: build_android(version, bump)
+# Requires: common module (prepare_and_check, compute_next_version)
+# =============================================================================
+
+def build_android(version, bump)
+  flavor = ENV['FLAVOR'] || 'prod'
+  firebase_android = ENV['FIREBASE_APP_ANDROID']
+  build_format = (ENV['BUILD_FORMAT'] || 'apk').downcase
+
+  prepare_and_check
+
+  begin
+    latest_release = firebase_app_distribution_get_latest_release(
+      app: firebase_android,
+      firebase_cli_token: ENV['FIREBASE_CLI_TOKEN']
+    )
+  rescue => ex
+    UI.important("Could not fetch latest Firebase release: #{ex}")
+    latest_release = nil
+  end
+
+  latest_build_number = latest_release && latest_release[:buildVersion] ? latest_release[:buildVersion].to_i : 1
+  latest_version = latest_release && latest_release[:displayVersion] ? latest_release[:displayVersion] : nil
+
+  build_name, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
+
+  if build_format == 'aab'
+    sh("flutter build appbundle --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}")
+    UI.message("Successfully built AAB!")
+  else
+    sh("flutter build apk --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}")
+    UI.message("Successfully built APK!")
+  end
+end

@@ -1,0 +1,29 @@
+# =============================================================================
+# Module: Android Deploy Firebase
+# Provides: deploy_android_to_app_distrib(version, bump)
+# Requires: android_build module (build_android)
+# =============================================================================
+
+def deploy_android_to_app_distrib(version, bump)
+  flavor = ENV['FLAVOR'] || 'dev'
+  firebase_android = ENV['FIREBASE_APP_ANDROID']
+  firebase_cli_token = ENV['FIREBASE_CLI_TOKEN']
+  tester_group = ENV['APP_STORE_TESTER_GROUP']
+
+  build_android(version, bump)
+
+  apk_path = "./build/app/outputs/flutter-apk/app-#{flavor}-release.apk"
+  unless File.exist?(apk_path)
+    apk_path = "./build/app/outputs/apk/#{flavor}/release/app-#{flavor}-release.apk"
+  end
+
+  firebase_app_distribution(
+    app: firebase_android,
+    android_artifact_type: 'APK',
+    android_artifact_path: apk_path,
+    firebase_cli_token: firebase_cli_token,
+    groups: tester_group
+  )
+
+  UI.message("Successfully deployed APK on Firebase App Distribution!")
+end

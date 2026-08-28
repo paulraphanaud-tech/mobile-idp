@@ -1,0 +1,27 @@
+# =============================================================================
+# Module: iOS Deploy Firebase
+# Provides: deploy_ios_to_app_distrib(version, bump)
+# Requires: ios_build module (build_ios)
+# =============================================================================
+
+def deploy_ios_to_app_distrib(version, bump)
+  flavor = ENV['FLAVOR']
+  firebase_ios = ENV['FIREBASE_APP_IOS']
+  firebase_cli_token = ENV['FIREBASE_CLI_TOKEN']
+
+  latest_release = firebase_app_distribution_get_latest_release(
+    app: firebase_ios
+  )
+  latest_build_number = latest_release[:buildVersion].to_i
+  latest_version = latest_release[:displayVersion]
+
+  build_ios(version, bump, latest_build_number, latest_version)
+
+  firebase_app_distribution(
+    app: firebase_ios,
+    ipa_path: "build/ios/ipa/app-#{flavor}-release.ipa",
+    firebase_cli_token: firebase_cli_token
+  )
+
+  UI.message("Successfully deployed IPA on Firebase App Distribution!")
+end

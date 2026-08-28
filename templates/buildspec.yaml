@@ -1,0 +1,76 @@
+version: 0.2
+
+env:
+  variables:
+    FASTLANE_ENV: "dev"
+    ANDROID_HOME: "/usr/local/android-sdk-manual"
+    ANDROID_SDK_ROOT: "/usr/local/android-sdk-manual"
+    S3_BUCKET_NAME: "{{PROJECT_NAME}}-keystores"
+  secrets-manager:
+    FLAVOR: "dev/secret/fastlane:FLAVOR"
+    SCHEME: "dev/secret/fastlane:SCHEME"
+    FIREBASE_APP_ANDROID: "dev/secret/fastlane:FIREBASE_APP_ANDROID"
+    APP_STORE_TESTER_GROUP: "dev/secret/fastlane:APP_STORE_TESTER_GROUP"
+    FL_AWS_REGION: "dev/secret/fastlane:AWS_REGION"
+    FIREBASE_CLI_TOKEN: "secret/env/fastlane:FIREBASE_CLI_TOKEN"
+    APP_STORE_CONNECT_API_KEY_KEY_ID: "secret/env/fastlane:APP_STORE_CONNECT_KEY_ID"
+    APP_STORE_CONNECT_API_KEY_ISSUER_ID: "secret/env/fastlane:APP_STORE_CONNECT_ISSUER_ID"
+    APP_STORE_CONNECT_API_KEY_KEY: "secret/env/fastlane:APP_STORE_CONNECT_KEY_CONTENT"
+    KEYSTORE_PASSWORD: "prod/android/signing:KEYSTORE_PASSWORD"
+    KEY_ALIAS: "prod/android/signing:KEY_ALIAS"
+    KEY_PASSWORD: "prod/android/signing:KEY_PASSWORD"
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto17
+    commands:
+      - gem install bundler
+      - bundle install
+      - |
+        if [ ! -d "$ANDROID_HOME" ]; then
+          mkdir -p "$ANDROID_HOME"
+          cd /tmp
+          curl -sSo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qo cmdline-tools.zip
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+        fi
+      - yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      - $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+      - |
+        if ! command -v flutter &>/dev/null; then
+          git clone https://github.com/flutter/flutter.git -b stable /opt/flutter
+          export PATH="/opt/flutter/bin:$PATH"
+          flutter precache
+        fi
+      - export PATH="/opt/flutter/bin:$PATH"
+
+  pre_build:
+    commands:
+      - export PATH="/opt/flutter/bin:$PATH"
+      - flutter --version
+      - |
+        echo "Downloading keystore from S3..."
+        mkdir -p android/app/keystore
+        aws s3 cp "s3://${S3_BUCKET_NAME}/release.keystore" android/app/keystore/release.keystore || echo "No keystore found — skipping"
+
+  build:
+    commands:
+      - export PATH="/opt/flutter/bin:$PATH"
+      - bundle exec fastlane android build_deploy
+
+  post_build:
+    commands:
+      - echo "Build completed on $(date)"
+      - rm -f android/app/keystore/release.keystore
+
+artifacts:
+  files:
+    - build/app/outputs/flutter-apk/app-*-release.apk
+  discard-paths: yes
+
+cache:
+  paths:
+    - vendor/bundle/**/*
+    - /opt/flutter/**/*

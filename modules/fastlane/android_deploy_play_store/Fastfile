@@ -1,0 +1,55 @@
+# =============================================================================
+# Module: Android Deploy Play Store
+# Provides: deploy_android_to_play_store(version, bump, track)
+# Requires: android_build module (build_android)
+#
+# Required ENV:
+#   GOOGLE_PLAY_JSON_KEY_DATA or GOOGLE_PLAY_JSON_KEY_PATH
+#   GOOGLE_PLAY_PACKAGE_NAME or APP_IDENTIFIER
+#   FLAVOR
+# Optional ENV:
+#   GOOGLE_PLAY_TRACK (default: internal)
+#   BUILD_FORMAT (default: apk, option: aab)
+# =============================================================================
+
+def deploy_android_to_play_store(version, bump, track)
+  flavor = ENV['FLAVOR'] || 'prod'
+  build_format = (ENV['BUILD_FORMAT'] || 'apk').downcase
+  track = track || ENV['GOOGLE_PLAY_TRACK'] || 'internal'
+  package_name = ENV['GOOGLE_PLAY_PACKAGE_NAME'] || ENV['APP_IDENTIFIER']
+
+  build_android(version, bump)
+
+  if build_format == 'aab'
+    artifact_path = "./build/app/outputs/bundle/#{flavor}Release/app-#{flavor}-release.aab"
+    supply(
+      package_name: package_name,
+      track: track,
+      aab: artifact_path,
+      json_key_data: ENV['GOOGLE_PLAY_JSON_KEY_DATA'],
+      json_key: ENV['GOOGLE_PLAY_JSON_KEY_PATH'],
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  else
+    apk_path = "./build/app/outputs/flutter-apk/app-#{flavor}-release.apk"
+    unless File.exist?(apk_path)
+      apk_path = "./build/app/outputs/apk/#{flavor}/release/app-#{flavor}-release.apk"
+    end
+    supply(
+      package_name: package_name,
+      track: track,
+      apk: apk_path,
+      json_key_data: ENV['GOOGLE_PLAY_JSON_KEY_DATA'],
+      json_key: ENV['GOOGLE_PLAY_JSON_KEY_PATH'],
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  UI.message("Successfully deployed to Google Play Store (track: #{track})!")
+end

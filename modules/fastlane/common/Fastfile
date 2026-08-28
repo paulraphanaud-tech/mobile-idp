@@ -1,0 +1,54 @@
+# =============================================================================
+# Module: Common
+# Shared helpers for all Fastlane modules
+# =============================================================================
+
+def in_project_root(&block)
+  Dir.chdir(File.expand_path("../../..", __dir__), &block)
+end
+
+def prepare_and_check
+  in_project_root do
+    sh("flutter clean")
+    sh("flutter pub get")
+
+    UI.message("Preparation step done with success!")
+  end
+end
+
+def compute_next_version(version, bump, latest_build_number, latest_version)
+  default_version = "1.0.0"
+  build_number = (latest_build_number || 0).to_i + 1
+
+  if version
+    UI.success("Next build will be #{version}+#{build_number}")
+    return version, build_number
+  end
+
+  base_version = latest_version || default_version
+
+  unless base_version =~ /^\d+\.\d+\.\d+$/
+    UI.important("'#{base_version}' is not valid. Using default value: #{default_version}")
+    base_version = default_version
+  end
+
+  major, minor, patch = base_version.split('.').map(&:to_i)
+  bump = (bump || "patch").downcase
+
+  case bump
+  when "major"
+    major += 1
+    minor = 0
+    patch = 0
+  when "minor"
+    minor += 1
+    patch = 0
+  else
+    patch += 1
+  end
+
+  build_version = "#{major}.#{minor}.#{patch}"
+  UI.success("Next build will be #{build_version}+#{build_number}")
+
+  return build_version, build_number
+end
