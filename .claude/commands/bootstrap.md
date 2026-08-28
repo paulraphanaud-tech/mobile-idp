@@ -341,7 +341,7 @@ After confirmation, generate all files in the TARGET project directory.
 
 ### 9b. Fastlane configuration (in target `fastlane/`)
 - **`Fastfile`** — Based on `templates/fastlane/Fastfile`, with import paths adjusted to the module path. Only include lanes for the selected platforms and deployment targets.
-- **`Pluginfile`** — Based on `templates/fastlane/Pluginfile`. Add `gem 'fastlane-plugin-google_play'` if Play Store deployment is selected.
+- **`Pluginfile`** — Based on `templates/fastlane/Pluginfile`. No extra plugin needed for Play Store — deployment uses fastlane's built-in `supply` action (the `fastlane-plugin-google_play` gem does not exist).
 - **`Matchfile`** — Based on `templates/fastlane/Matchfile` (only if iOS)
 - **`env.dev`** — Based on `templates/fastlane/env.dev`, with all values filled in
 - **`env.secret.example`** — Based on `templates/fastlane/env.secret.example`, customized to only include relevant secrets for selected platforms/targets
