@@ -364,6 +364,24 @@ After confirmation, generate all files in the TARGET project directory.
 - **`buildspec.yaml`** — Based on `templates/buildspec.yaml` (only if Android)
 - **`buildspec_ios.yml`** — Based on `templates/buildspec_ios.yml` (only if iOS)
 
+**Subdirectory repos**: check whether the Flutter project sits at the git
+repo's root or inside a subdirectory (compare `git -C <target_path>
+rev-parse --show-toplevel` against `<target_path>` — if they differ, the
+project is nested, e.g. an `adin/` subfolder alongside `.claude/` or other
+repo-root files). CodeBuild's `buildspec` path is resolved relative to the
+repo root it clones, and build commands run with CWD = repo root — neither
+knows about the subdirectory on its own. If nested:
+- Set `android_buildspec`/`ios_buildspec` on the `codebuild` module call in
+  `infra/main.tf` to `"{subdir}/buildspec.yaml"` /
+  `"{subdir}/buildspec_ios.yml"` (paths, not module variable defaults).
+- Add `cd {subdir}` as the *first* command of each buildspec's `install`
+  phase — it persists across all later phases in the same build.
+- Add `base-directory: {subdir}` under `artifacts` in both buildspecs.
+- Prefix every `cache.paths` entry that isn't an absolute/`$HOME` path with
+  `{subdir}/` (e.g. `vendor/bundle/**/*` → `{subdir}/vendor/bundle/**/*`).
+Skip all of this when the Flutter project is already at repo root — that's
+what the templates assume by default.
+
 ### 9e. Terraform infrastructure (in target `infra/`)
 - **`main.tf`** — Copy from `infra/main.tf`, adjust module source paths. Remove module blocks for platforms not selected (e.g., remove Firebase iOS app if iOS not selected).
 - **`providers.tf`** — Copy from `infra/providers.tf`
