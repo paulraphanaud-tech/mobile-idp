@@ -43,7 +43,7 @@ resource "aws_codebuild_project" "android" {
     git_clone_depth = 1
 
     git_submodules_config {
-      fetch_submodules = false
+      fetch_submodules = true
     }
   }
 
@@ -127,7 +127,7 @@ resource "aws_codebuild_project" "ios" {
     git_clone_depth = 1
 
     git_submodules_config {
-      fetch_submodules = false
+      fetch_submodules = true
     }
   }
 
