@@ -75,7 +75,16 @@ Ask the user:
 
 4. **Firebase per flavor?** — Do they have separate Firebase projects/apps per flavor?
    - If yes: collect Firebase App IDs per flavor per platform
-   - If no: same Firebase config for all flavors (or no Firebase)
+   - If no: same Firebase *project* for all flavors — but if any flavor's
+     `applicationId`/bundle ID gets a suffix (e.g. `.dev`), it still needs
+     its **own Firebase app registration** within that shared project.
+     Firebase App Distribution enforces exact package-name matching on
+     upload ("The APK package name '...' does not match your Firebase
+     app's package name '...'"), so a single Firebase app cannot serve
+     two different package names. This means Terraform's `firebase`
+     module (one Android app + one iOS app per `google_firebase_project`)
+     needs a second `google_firebase_android_app`/`google_firebase_apple_app`
+     pair for any suffixed flavor — see Step 2d/3d.
 
 5. **Separate entry points?** — Do they want per-flavor Dart entry points? (e.g., `lib/main_dev.dart`, `lib/main_prod.dart`)
    - If yes: we'll create them with flavor-specific configuration
