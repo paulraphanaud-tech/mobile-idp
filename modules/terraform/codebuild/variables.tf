@@ -44,9 +44,9 @@ variable "secrets_manager_variables" {
 }
 
 variable "android_compute_type" {
-  description = "Compute type for the Android CodeBuild project"
+  description = "Compute type for the Android CodeBuild project. MEDIUM (3GB RAM) is not enough for a real Flutter/Gradle/NDK build — the Gradle daemon gets OOM-killed partway through assembleRelease."
   type        = string
-  default     = "BUILD_GENERAL1_MEDIUM"
+  default     = "BUILD_GENERAL1_LARGE"
 }
 
 variable "ios_compute_type" {
