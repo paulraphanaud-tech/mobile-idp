@@ -8,13 +8,10 @@ def create_app_on_asc(name, language)
   app_name = name || ENV['APP_NAME']
   team_id = ENV['APPLE_TEAM_ID']
 
-  app_store_connect_api_key(
-    key_id: ENV['APP_STORE_CONNECT_KEY_ID'],
-    issuer_id: ENV['APP_STORE_CONNECT_ISSUER_ID'],
-    key_content: ENV['APP_STORE_CONNECT_KEY_CONTENT']
-  )
+  # App Store Connect API key auth is already established in before_all.
 
   produce(
+    username: ENV['APPLE_USERNAME'],
     app_identifier: app_identifier,
     app_name: app_name,
     team_id: team_id,

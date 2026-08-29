@@ -59,13 +59,13 @@ flutter-test:
 .PHONY: build-android deploy-android-firebase deploy-android-play-store
 
 build-android:
-	bundle exec fastlane android build bump:$(BUMP)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android build bump:$(BUMP)
 
 deploy-android-firebase:
-	bundle exec fastlane android deploy_firebase bump:$(BUMP)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android deploy_firebase bump:$(BUMP)
 
 deploy-android-play-store:
-	bundle exec fastlane android deploy_play_store bump:$(BUMP) track:$(TRACK)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android deploy_play_store bump:$(BUMP) track:$(TRACK)
 
 # =============================================================================
 # iOS - Fastlane
@@ -73,13 +73,13 @@ deploy-android-play-store:
 .PHONY: build-ios deploy-ios-firebase deploy-ios-testflight
 
 build-ios:
-	bundle exec fastlane ios build bump:$(BUMP)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios build bump:$(BUMP)
 
 deploy-ios-firebase:
-	bundle exec fastlane ios deploy_firebase bump:$(BUMP)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios deploy_firebase bump:$(BUMP)
 
 deploy-ios-testflight:
-	bundle exec fastlane ios deploy_testflight bump:$(BUMP)
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios deploy_testflight bump:$(BUMP)
 
 # =============================================================================
 # Certificates & Signing
@@ -87,13 +87,13 @@ deploy-ios-testflight:
 .PHONY: sync-certs sync-certs-appstore create-app
 
 sync-certs:
-	bundle exec fastlane ios sync_certs type:development
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios sync_certs type:development
 
 sync-certs-appstore:
-	bundle exec fastlane ios sync_certs type:appstore
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios sync_certs type:appstore
 
 create-app:
-	bundle exec fastlane ios create_app
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios create_app
 
 # =============================================================================
 # Android Keystore
@@ -101,13 +101,13 @@ create-app:
 .PHONY: generate-keystore upload-keystore download-keystore
 
 generate-keystore:
-	bundle exec fastlane android generate_keystore
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android generate_keystore
 
 upload-keystore:
-	bundle exec fastlane android upload_keystore
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android upload_keystore
 
 download-keystore:
-	bundle exec fastlane android download_keystore
+	FASTLANE_ENV=$(ENV) bundle exec fastlane android download_keystore
 
 # =============================================================================
 # Full Setup

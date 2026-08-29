@@ -4,8 +4,8 @@
 # Requires: ios_build module (build_ios)
 #
 # Required ENV:
-#   APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID
-#   APP_STORE_CONNECT_KEY_CONTENT
+#   APP_STORE_CONNECT_API_KEY_KEY_ID, APP_STORE_CONNECT_API_KEY_ISSUER_ID,
+#   APP_STORE_CONNECT_API_KEY_KEY (auth established in Fastfile before_all)
 #   APP_IDENTIFIER
 #   FLAVOR
 # =============================================================================
@@ -14,12 +14,6 @@ def deploy_ios_to_app_store_connect(version, bump)
   flavor = ENV['FLAVOR']
   tester_group = ENV['APP_STORE_TESTER_GROUP']
   app_identifier = ENV['APP_IDENTIFIER']
-
-  app_store_connect_api_key(
-    key_id: ENV['APP_STORE_CONNECT_KEY_ID'],
-    issuer_id: ENV['APP_STORE_CONNECT_ISSUER_ID'],
-    key_content: ENV['APP_STORE_CONNECT_KEY_CONTENT']
-  )
 
   app_store_build_number(
     app_identifier: app_identifier,
