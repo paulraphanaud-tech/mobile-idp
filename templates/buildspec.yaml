@@ -30,11 +30,13 @@ phases:
       - |
         if [ ! -d "$ANDROID_HOME" ]; then
           mkdir -p "$ANDROID_HOME"
-          cd /tmp
-          curl -sSo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -qo cmdline-tools.zip
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          (
+            cd /tmp
+            curl -sSo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -qo cmdline-tools.zip
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          )
         fi
       - yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
       - $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
@@ -53,7 +55,7 @@ phases:
       - |
         echo "Downloading keystore from S3..."
         mkdir -p android/app/keystore
-        aws s3 cp "s3://${S3_BUCKET_NAME}/release.keystore" android/app/keystore/release.keystore || echo "No keystore found — skipping"
+        aws s3 cp "s3://${S3_BUCKET_NAME}/keystore/release-key.jks" android/app/keystore/release-key.jks || echo "No keystore found — skipping"
 
   build:
     commands:
@@ -63,7 +65,7 @@ phases:
   post_build:
     commands:
       - echo "Build completed on $(date)"
-      - rm -f android/app/keystore/release.keystore
+      - rm -f android/app/keystore/release-key.jks
 
 artifacts:
   files:
