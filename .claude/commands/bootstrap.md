@@ -148,6 +148,8 @@ Ask: "Do you already have an App Store Connect API Key (.p8 file)?"
 8. Wait for them to provide Key ID, Issuer ID, and the path to the `.p8` file
 9. Read the `.p8` file content and store it for `env.secret`
 
+Note for later: this API key is enough for Match (certs/profiles) and TestFlight uploads, but NOT for creating a brand-new Bundle ID or App Store Connect app record — those two one-time steps go through fastlane's legacy Apple ID session client and always need interactive login, API key or not. Registering them is a manual step (see the final checklist) — link the user to developer.apple.com/account/resources/identifiers and appstoreconnect.apple.com/apps when the time comes.
+
 ### 3c. iOS Certificates (Match)
 
 Explain: "Fastlane Match will manage your iOS signing certificates and provisioning profiles, stored in an S3 bucket. This will be set up automatically during infrastructure provisioning."
@@ -431,18 +433,27 @@ Remaining steps (in order):
   4. Populate CI/CD secrets in AWS Secrets Manager:
      make populate-secrets
 
-  5. Sync iOS certificates (if iOS):
+  5. Register the app on Apple's side (if iOS) — manual, one-time, ~2 min
+     each, can't be automated (see note in Step 3b):
+     - Bundle ID: developer.apple.com/account/resources/identifiers → + →
+       App IDs → App → Explicit bundle ID {IOS_BUNDLE_ID}
+     - App Store Connect record: appstoreconnect.apple.com/apps → + →
+       New App → select that bundle ID
+     Do this BEFORE step 6, or Match/sync-certs will fail with
+     "Could not find App ID with bundle identifier ...".
+
+  6. Sync iOS certificates (if iOS):
      make sync-certs
      make sync-certs-appstore
 
-  6. Upload Android keystore to S3 (if Android):
+  7. Upload Android keystore to S3 (if Android):
      make upload-keystore
 
-  7. Test a local build:
+  8. Test a local build:
      make build-android     (if Android)
      make build-ios         (if iOS)
 
-  8. Push and trigger the pipeline:
+  9. Push and trigger the pipeline:
      git add . && git commit -m "Add CI/CD platform"
      git push
 ```

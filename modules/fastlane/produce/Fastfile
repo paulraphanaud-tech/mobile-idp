@@ -1,6 +1,18 @@
 # =============================================================================
 # Module: Produce
 # Provides: create_app_on_asc(name, language)
+#
+# NOT fully headless. Both steps `produce` normally performs — registering
+# the Bundle ID on the Developer Portal, and creating the app record in App
+# Store Connect — go through fastlane's legacy Spaceship::Portal/Tunes web
+# session client, which always requires interactive Apple ID + password
+# (+ 2FA) login, regardless of App Store Connect API key auth. This is a
+# fastlane/Apple limitation, not something skip_devcenter/API-key auth can
+# route around. In practice: register the Bundle ID at
+# developer.apple.com/account/resources/identifiers and create the app at
+# appstoreconnect.apple.com/apps manually (one-time, ~2 min each) before
+# using this lane. skip_devcenter below just avoids a redundant, doomed
+# login prompt for the Bundle ID half once it already exists.
 # =============================================================================
 
 def create_app_on_asc(name, language)
@@ -9,6 +21,7 @@ def create_app_on_asc(name, language)
   team_id = ENV['APPLE_TEAM_ID']
 
   # App Store Connect API key auth is already established in before_all.
+  # (Not used by this action — see module note above.)
 
   produce(
     username: ENV['APPLE_USERNAME'],
@@ -17,7 +30,8 @@ def create_app_on_asc(name, language)
     team_id: team_id,
     sku: ENV['APP_SKU'] || app_identifier,
     language: language || "en-US",
-    enable_services: {}
+    enable_services: {},
+    skip_devcenter: true
   )
 
   UI.message("App '#{app_name}' (#{app_identifier}) created on App Store Connect!")
