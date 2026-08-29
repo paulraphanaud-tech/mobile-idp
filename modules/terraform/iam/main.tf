@@ -80,8 +80,8 @@ data "aws_iam_policy_document" "codebuild_policy" {
       "logs:PutLogEvents",
     ]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/codebuild/${var.project_name}-*",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/codebuild/${var.project_name}-*:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/codebuild/${var.project_name}-*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/codebuild/${var.project_name}-*:*",
     ]
   }
 
