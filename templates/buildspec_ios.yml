@@ -16,6 +16,7 @@ env:
     APP_STORE_CONNECT_API_KEY_KEY_ID: "secret/env/fastlane:APP_STORE_CONNECT_KEY_ID"
     APP_STORE_CONNECT_API_KEY_ISSUER_ID: "secret/env/fastlane:APP_STORE_CONNECT_ISSUER_ID"
     APP_STORE_CONNECT_API_KEY_KEY: "secret/env/fastlane:APP_STORE_CONNECT_KEY_CONTENT"
+    MATCH_PASSWORD: "secret/env/fastlane:MATCH_PASSWORD"
 
 phases:
   install:

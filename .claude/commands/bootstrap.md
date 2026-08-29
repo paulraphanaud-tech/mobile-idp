@@ -155,6 +155,7 @@ Explain: "Fastlane Match will manage your iOS signing certificates and provision
 Ask:
 - **Match S3 bucket name** — Default: `{project-name}-match`
 - "Have you already initialized Match for this app's bundle ID?" (usually No for a new project)
+- **Match password** — the passphrase Match uses to encrypt certs/profiles at rest in S3 (this is required — `match` will fail with "Bailing out instead of asking for a password, since this is non-interactive mode" if `MATCH_PASSWORD` is unset). Offer to generate a strong random one (e.g. `openssl rand -base64 24`) rather than asking the user to invent one; store it for `env.secret`.
 
 ---
 
@@ -348,6 +349,7 @@ After confirmation, generate all files in the TARGET project directory.
 
 ### 9c. Secrets file
 - **`env.secret`** — Write the actual collected secrets to `fastlane/env.secret` (this file is gitignored). Include all secrets the user provided during the wizard:
+  - `MATCH_PASSWORD` (if iOS — required for Match's S3 storage mode, see Step 3c)
   - `FIREBASE_CLI_TOKEN`
   - `APP_STORE_CONNECT_API_KEY_KEY_ID`, `APP_STORE_CONNECT_API_KEY_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_KEY`, `APP_STORE_CONNECT_API_KEY_IS_KEY_CONTENT_BASE64=false`
   - `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (if provided)

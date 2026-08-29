@@ -72,6 +72,7 @@ module "codebuild" {
     APP_STORE_CONNECT_KEY_ID     = "secret/env/fastlane:APP_STORE_CONNECT_KEY_ID"
     APP_STORE_CONNECT_ISSUER_ID  = "secret/env/fastlane:APP_STORE_CONNECT_ISSUER_ID"
     APP_STORE_CONNECT_KEY_CONTENT = "secret/env/fastlane:APP_STORE_CONNECT_KEY_CONTENT"
+    MATCH_PASSWORD               = "secret/env/fastlane:MATCH_PASSWORD"
     KEYSTORE_B64                 = "prod/android/signing:KEYSTORE_BASE64"
     KEYSTORE_PASSWORD            = "prod/android/signing:KEYSTORE_PASSWORD"
     KEY_ALIAS                    = "prod/android/signing:KEY_ALIAS"

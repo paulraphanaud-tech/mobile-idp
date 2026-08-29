@@ -50,9 +50,9 @@ variable "android_compute_type" {
 }
 
 variable "ios_compute_type" {
-  description = "Compute type for the iOS CodeBuild project"
+  description = "Compute type for the iOS CodeBuild project (Mac fleet). BUILD_GENERAL1_LARGE is not available in all regions for MAC_ARM."
   type        = string
-  default     = "BUILD_GENERAL1_LARGE"
+  default     = "BUILD_GENERAL1_MEDIUM"
 }
 
 variable "tags" {

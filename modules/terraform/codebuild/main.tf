@@ -63,6 +63,23 @@ resource "aws_codebuild_project" "android" {
 }
 
 ###############################################################################
+# Mac Fleet (reserved capacity) — macOS CodeBuild environments are not
+# available as on-demand compute; they require a Fleet.
+###############################################################################
+
+resource "aws_codebuild_fleet" "mac" {
+  name             = "${var.project_name}-mac-fleet"
+  base_capacity    = 1
+  compute_type     = var.ios_compute_type
+  environment_type = "MAC_ARM"
+
+  tags = merge(var.tags, {
+    Project  = var.project_name
+    Platform = "ios"
+  })
+}
+
+###############################################################################
 # iOS CodeBuild Project
 ###############################################################################
 
@@ -79,6 +96,10 @@ resource "aws_codebuild_project" "ios" {
     compute_type = var.ios_compute_type
     image        = "aws/codebuild/macos-aarch64-sonoma:4.0"
     type         = "MAC_ARM"
+
+    fleet {
+      fleet_arn = aws_codebuild_fleet.mac.arn
+    }
 
     dynamic "environment_variable" {
       for_each = var.environment_variables
