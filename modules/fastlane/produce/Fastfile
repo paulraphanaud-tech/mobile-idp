@@ -2,13 +2,22 @@
 # Module: Produce
 # Provides: create_app_on_asc(name, language)
 #
-# NOT fully headless. Both steps `produce` normally performs — registering
-# the Bundle ID on the Developer Portal, and creating the app record in App
-# Store Connect — go through fastlane's legacy Spaceship::Portal/Tunes web
-# session client, which always requires interactive Apple ID + password
-# (+ 2FA) login, regardless of App Store Connect API key auth. This is a
-# fastlane/Apple limitation, not something skip_devcenter/API-key auth can
-# route around. In practice: register the Bundle ID at
+# NOT fully headless — and not fixable by calling the API differently.
+# Both steps `produce` normally performs need interactive Apple ID login:
+#
+# - Bundle ID registration goes through the classic Developer Portal web
+#   session (Spaceship::Portal), which has no API-key equivalent at all.
+# - App creation in App Store Connect: `produce`'s own path
+#   (Spaceship::ConnectAPI.login(..., use_tunes: true)) forces the same kind
+#   of legacy session login. But this isn't just a fastlane shortcut we
+#   could bypass — calling Spaceship::ConnectAPI::App.create directly with a
+#   pure API-key token (no legacy session at all) was tried and Apple's API
+#   itself rejects it: "The given operation is not allowed - The resource
+#   'apps' does not allow 'CREATE'. Allowed operations are: GET_COLLECTION,
+#   GET_INSTANCE, UPDATE." App creation is excluded from what API keys can
+#   do, by Apple's own API permissions model — there is no automatable path.
+#
+# In practice: register the Bundle ID at
 # developer.apple.com/account/resources/identifiers and create the app at
 # appstoreconnect.apple.com/apps manually (one-time, ~2 min each) before
 # using this lane. skip_devcenter below just avoids a redundant, doomed
