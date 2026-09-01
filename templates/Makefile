@@ -92,8 +92,10 @@ sync-certs:
 sync-certs-appstore:
 	FASTLANE_ENV=$(ENV) bundle exec fastlane ios sync_certs type:appstore
 
+# APP_NAME overrides the App Store listing name (globally unique across all
+# of Apple's store): make create-app APP_NAME="My App"
 create-app:
-	FASTLANE_ENV=$(ENV) bundle exec fastlane ios create_app
+	FASTLANE_ENV=$(ENV) bundle exec fastlane ios create_app $(if $(APP_NAME),name:"$(APP_NAME)",)
 
 # =============================================================================
 # Android Keystore

@@ -2,26 +2,32 @@
 # Module: Produce
 # Provides: create_app_on_asc(name, language)
 #
-# NOT fully headless — and not fixable by calling the API differently.
-# Both steps `produce` normally performs need interactive Apple ID login:
+# Auth: this lane does NOT use the App Store Connect API key. Apple's public
+# API has no app-creation endpoint — hitting it with an API-key JWT returns
+# "The resource 'apps' does not allow 'CREATE'. Allowed operations are:
+# GET_COLLECTION, GET_INSTANCE, UPDATE". `produce` instead drives the same
+# internal endpoint the App Store Connect website uses, authenticated with a
+# web session, which *does* permit creation.
 #
-# - Bundle ID registration goes through the classic Developer Portal web
-#   session (Spaceship::Portal), which has no API-key equivalent at all.
-# - App creation in App Store Connect: `produce`'s own path
-#   (Spaceship::ConnectAPI.login(..., use_tunes: true)) forces the same kind
-#   of legacy session login. But this isn't just a fastlane shortcut we
-#   could bypass — calling Spaceship::ConnectAPI::App.create directly with a
-#   pure API-key token (no legacy session at all) was tried and Apple's API
-#   itself rejects it: "The given operation is not allowed - The resource
-#   'apps' does not allow 'CREATE'. Allowed operations are: GET_COLLECTION,
-#   GET_INSTANCE, UPDATE." App creation is excluded from what API keys can
-#   do, by Apple's own API permissions model — there is no automatable path.
+# That session can be supplied non-interactively via env vars, so this lane
+# runs headlessly (locally and in CI):
 #
-# In practice: register the Bundle ID at
-# developer.apple.com/account/resources/identifiers and create the app at
-# appstoreconnect.apple.com/apps manually (one-time, ~2 min each) before
-# using this lane. skip_devcenter below just avoids a redundant, doomed
-# login prompt for the Bundle ID half once it already exists.
+#   FASTLANE_USER     — Apple ID (same value as APPLE_USERNAME)
+#   FASTLANE_PASSWORD — Apple ID password
+#   FASTLANE_SESSION  — 2FA session cookie
+#
+# Generate FASTLANE_SESSION once with:
+#   bundle exec fastlane spaceauth -u <apple-id>
+# It prompts for the 2FA code on your device, then prints a YAML cookie
+# string to export. It is valid for roughly 30 days, after which the lane
+# fails with UnauthorizedAccessError and you re-run spaceauth. Store all
+# three in fastlane/env.secret locally and in Secrets Manager for CI.
+#
+# skip_devcenter is set below: Bundle ID registration on the Developer
+# Portal is a separate one-time step with no automatable equivalent, so
+# register the identifier at
+# developer.apple.com/account/resources/identifiers first, then this lane
+# creates only the App Store Connect record.
 # =============================================================================
 
 def create_app_on_asc(name, language)
@@ -29,8 +35,8 @@ def create_app_on_asc(name, language)
   app_name = name || ENV['APP_NAME']
   team_id = ENV['APPLE_TEAM_ID']
 
-  # App Store Connect API key auth is already established in before_all.
-  # (Not used by this action — see module note above.)
+  # Authenticated by FASTLANE_USER/PASSWORD/SESSION, not the ASC API key
+  # established in before_all — see module note above.
 
   produce(
     username: ENV['APPLE_USERNAME'],

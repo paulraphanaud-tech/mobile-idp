@@ -148,7 +148,7 @@ Ask: "Do you already have an App Store Connect API Key (.p8 file)?"
 8. Wait for them to provide Key ID, Issuer ID, and the path to the `.p8` file
 9. Read the `.p8` file content and store it for `env.secret`
 
-Note for later: this API key is enough for Match (certs/profiles) and TestFlight uploads, but NOT for creating a brand-new Bundle ID or App Store Connect app record — those two one-time steps go through fastlane's legacy Apple ID session client and always need interactive login, API key or not. Registering them is a manual step (see the final checklist) — link the user to developer.apple.com/account/resources/identifiers and appstoreconnect.apple.com/apps when the time comes.
+Note for later: this API key covers Match (certs/profiles) and TestFlight uploads, but Apple's public API has **no app-creation endpoint** (`POST /v1/apps` returns "The resource 'apps' does not allow 'CREATE'"). The `create_app` lane therefore authenticates with an Apple ID **web session** instead, which does permit creation — see Step 3d. Bundle ID registration on the Developer Portal remains manual (no automatable equivalent).
 
 ### 3c. iOS Certificates (Match)
 
@@ -158,6 +158,22 @@ Ask:
 - **Match S3 bucket name** — Default: `{project-name}-match`
 - "Have you already initialized Match for this app's bundle ID?" (usually No for a new project)
 - **Match password** — the passphrase Match uses to encrypt certs/profiles at rest in S3 (this is required — `match` will fail with "Bailing out instead of asking for a password, since this is non-interactive mode" if `MATCH_PASSWORD` is unset). Offer to generate a strong random one (e.g. `openssl rand -base64 24`) rather than asking the user to invent one; store it for `env.secret`.
+
+### 3d. Apple ID web session (for the `create_app` lane)
+
+Only needed if they want `make create-app` / `fastlane ios create_app` to create the App Store Connect record for them. Apple's API key cannot do this (`apps` does not allow `CREATE`); `produce` uses an Apple ID web session, which can.
+
+Explain, then collect:
+1. Tell them to run, in a **real terminal** (needs a TTY for the 2FA code — it will not work through a non-interactive shell):
+   `bundle exec fastlane spaceauth -u <apple-id>`
+2. It prompts for their Apple ID password and a 2FA code, then prints a YAML cookie string.
+3. Store it as `FASTLANE_SESSION`, plus `FASTLANE_USER` (the Apple ID), in `env.secret`.
+
+**Critical formatting**: `FASTLANE_SESSION` must be **single-quoted** in `env.secret`. fastlane's `load_session_from_env` does `gsub("\\n", "\n")`, so the literal `\n` sequences must reach it intact — unquoted, Dotenv strips the backslashes; double-quoted, Dotenv expands them early *and* the value's inner `"` characters (`path: "/"`) terminate the string. Single quotes preserve it exactly.
+
+Warn them the session expires after roughly 30 days, after which the lane fails with `UnauthorizedAccessError` and they re-run `spaceauth`. This makes `create_app` unsuitable for unattended CI; it's meant as a one-time-per-app developer-machine convenience.
+
+Also note: **App Store Connect app names are globally unique across all of Apple's store**, not just the account. A collision returns "The App Name you entered is already being used" — have a fallback name ready. The App Store listing name is independent of the on-device name (which comes from the flavor config), and is renameable until first release.
 
 ---
 
@@ -451,14 +467,19 @@ Remaining steps (in order):
   4. Populate CI/CD secrets in AWS Secrets Manager:
      make populate-secrets
 
-  5. Register the app on Apple's side (if iOS) — manual, one-time, ~2 min
-     each, can't be automated (see note in Step 3b):
-     - Bundle ID: developer.apple.com/account/resources/identifiers → + →
-       App IDs → App → Explicit bundle ID {IOS_BUNDLE_ID}
-     - App Store Connect record: appstoreconnect.apple.com/apps → + →
-       New App → select that bundle ID
-     Do this BEFORE step 6, or Match/sync-certs will fail with
-     "Could not find App ID with bundle identifier ...".
+  5. Register the app on Apple's side (if iOS). Do this BEFORE step 6, or
+     Match/sync-certs fails with "Could not find App ID with bundle
+     identifier ...".
+     a. Bundle ID — manual, one-time, ~2 min, no automatable equivalent:
+        developer.apple.com/account/resources/identifiers → + → App IDs →
+        App → Explicit bundle ID {IOS_BUNDLE_ID}
+     b. App Store Connect record — automated, needs FASTLANE_SESSION from
+        Step 3d:
+        make create-app                     # uses env.dev / APP_IDENTIFIER
+        FASTLANE_ENV=prod make create-app   # for the prod flavor
+        App Store names are globally unique — if it errors with "The App
+        Name you entered is already being used", pass a different one:
+        bundle exec fastlane ios create_app name:"Some Other Name"
 
   6. Sync iOS certificates (if iOS):
      make sync-certs
