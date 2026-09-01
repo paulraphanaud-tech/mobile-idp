@@ -7,6 +7,8 @@ env:
     BUMP: "patch"
     MATCH_S3_BUCKET: "{{PROJECT_NAME}}-match"
     FL_AWS_REGION: "{{AWS_REGION}}"
+    MATCH_KEYCHAIN_NAME: "fastlane_tmp.keychain"
+    MATCH_KEYCHAIN_PASSWORD: ""
   secrets-manager:
     FLAVOR: "dev/secret/fastlane:FLAVOR"
     SCHEME: "dev/secret/fastlane:SCHEME"
@@ -36,6 +38,21 @@ phases:
       - export PATH="$HOME/flutter/bin:$PATH"
       - flutter --version
       - export AWS_REGION="${FL_AWS_REGION}"
+      # Match installs the signing certificate into a keychain. The CI user's
+      # login keychain is not usable unattended, so use a dedicated one that
+      # stays unlocked for the build.
+      - |
+        security create-keychain -p "" "$MATCH_KEYCHAIN_NAME" 2>/dev/null || true
+        security default-keychain -s "$MATCH_KEYCHAIN_NAME"
+        security unlock-keychain -p "" "$MATCH_KEYCHAIN_NAME"
+        security set-keychain-settings -t 3600 -u "$MATCH_KEYCHAIN_NAME"
+      # build_ios only archives — it does not fetch signing assets. Without
+      # this the archive fails with "No profiles for '<bundle id>' were
+      # found". readonly so CI never creates or revokes certificates.
+      - |
+        if [ "$TARGET" = "app_distrib" ]; then MATCH_TYPE=adhoc; else MATCH_TYPE=appstore; fi
+        echo "Syncing $MATCH_TYPE signing assets"
+        bundle exec fastlane ios sync_certs type:$MATCH_TYPE readonly:true
 
   build:
     commands:
