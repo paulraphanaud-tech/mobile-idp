@@ -260,7 +260,15 @@ For each NEW flavor (skip flavors that already have configurations):
          
          new_config = target.add_build_configuration(config_name, target_base.type)
          new_config.build_settings = target_base.build_settings.clone
-         
+
+         # REQUIRED: build_settings does not carry the xcconfig link. Without
+         # this the new config never includes Flutter's Generated.xcconfig, so
+         # FLUTTER_ROOT is empty and archiving dies in the scheme's pre-action
+         # with "/bin/sh: /packages/flutter_tools/bin/xcode_backend.sh: No such
+         # file or directory". `flutter build` still works (it locates the SDK
+         # itself), so this only shows up later, at `gym`/archive time.
+         new_config.base_configuration_reference = target_base.base_configuration_reference
+
          if target.name == 'Runner'
            bundle_id = base_bundle_id + config[:bundle_suffix]
            new_config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = bundle_id
@@ -270,8 +278,10 @@ For each NEW flavor (skip flavors that already have configurations):
        # Also duplicate project-level configuration
        project_base = project.build_configuration_list.build_configurations.find { |c| c.name == base_config_name }
        if project_base
-         new_project_config = project.build_configuration_list.build_configurations.new(config_name)
+         # Use add_build_configuration — ObjectList has no `new`.
+         new_project_config = project.add_build_configuration(config_name, project_base.type)
          new_project_config.build_settings = project_base.build_settings.clone
+         new_project_config.base_configuration_reference = project_base.base_configuration_reference
        end
      end
    end
@@ -650,6 +660,35 @@ Before modifying any existing file, show the user what will change and ask for c
 After all changes are applied, provide:
 
 ### Verification commands
+
+**iOS: check every flavor config kept its xcconfig link.** `flutter build`
+passes even when this is broken; it only surfaces later as an archive
+failure, so verify it explicitly:
+
+```bash
+bundle exec ruby -e "
+require 'xcodeproj'
+p = Xcodeproj::Project.open('ios/Runner.xcodeproj')
+t = p.native_targets.find { |x| x.name == 'Runner' }
+bad = t.build_configurations.reject(&:base_configuration_reference).map(&:name)
+puts bad.empty? ? 'OK: all configs have an xcconfig base' : \"MISSING xcconfig: #{bad.join(', ')}\"
+"
+```
+
+Also confirm each config carries the right bundle ID (no leftover
+`com.example.*` on a flavor config):
+
+```bash
+bundle exec ruby -e "
+require 'xcodeproj'
+p = Xcodeproj::Project.open('ios/Runner.xcodeproj')
+t = p.native_targets.find { |x| x.name == 'Runner' }
+t.build_configurations.sort_by(&:name).each { |c|
+  puts c.name.ljust(16) + ' -> ' + c.build_settings['PRODUCT_BUNDLE_IDENTIFIER'].to_s
+}
+"
+```
+
 ```bash
 # Verify Android flavors
 cd android && ./gradlew app:tasks --group="build" | grep -i "assemble"

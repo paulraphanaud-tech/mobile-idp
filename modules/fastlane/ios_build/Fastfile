@@ -20,21 +20,92 @@ def update_ios_version(version, bump, latest_build_number, latest_version)
   UI.message("Version updated => #{build_version}(#{build_number})!")
 end
 
+require 'shellwords'
+
+# Maps an export_options.plist `method` to the Match profile-type name that
+# appears in the profile Match creates ("match <Type> <bundle id>").
+MATCH_TYPE_FOR_EXPORT_METHOD = {
+  "app-store"   => "AppStore",
+  "ad-hoc"      => "AdHoc",
+  "development" => "Development",
+  "enterprise"  => "InHouse",
+}.freeze
+
+# The signing identity each export method's profile expects. An App Store or
+# ad-hoc profile only accepts a distribution certificate, so leaving Xcode to
+# pick the development one fails with "Provisioning profile ... doesn't
+# include signing certificate 'Apple Development: ...'".
+CODE_SIGN_IDENTITY_FOR_EXPORT_METHOD = {
+  "app-store"   => "Apple Distribution",
+  "ad-hoc"      => "Apple Distribution",
+  "enterprise"  => "Apple Distribution",
+  "development" => "Apple Development",
+}.freeze
+
+# Walks up to the directory holding pubspec.yaml. Needed because fastlane's
+# working directory is not consistent: real actions (gym, etc.) run from the
+# project root, but a bare `sh` runs from fastlane/, so a single relative
+# path cannot work for both.
+def flutter_project_root
+  dir = Dir.pwd
+  until dir == "/"
+    return dir if File.exist?(File.join(dir, "pubspec.yaml"))
+    dir = File.dirname(dir)
+  end
+  UI.user_error!("Could not find the Flutter project root (no pubspec.yaml at or above #{Dir.pwd})")
+end
+
 def build_ios(version, bump, latest_build_number, latest_version)
   flavor = ENV['FLAVOR']
   scheme = ENV['SCHEME']
+  app_identifier = ENV['APP_IDENTIFIER']
+  team_id = ENV['APPLE_TEAM_ID']
 
   prepare_and_check
   update_ios_version(version, bump, latest_build_number, latest_version)
 
   sh("flutter build ios --release --flavor #{flavor} --no-codesign")
 
+  # Take the export method from the flavor's own plist rather than assuming
+  # app-store — dev/staging flavors export ad-hoc for Firebase distribution.
+  # Absolute path so it resolves the same from any fastlane working directory.
+  export_options = File.join(flutter_project_root, "ios", "export_options_#{flavor}.plist")
+  UI.user_error!("Missing export options plist: #{export_options}") unless File.exist?(export_options)
+
+  export_method = sh(
+    "/usr/libexec/PlistBuddy -c 'Print :method' #{export_options.shellescape}",
+    log: false
+  ).strip
+
+  match_type = MATCH_TYPE_FOR_EXPORT_METHOD[export_method]
+  UI.user_error!("Unsupported export method '#{export_method}' in #{export_options}") if match_type.nil?
+  profile_name = "match #{match_type} #{app_identifier}"
+
+  # Scope manual signing to the Runner target's own configuration. Passing
+  # these through gym's xcargs instead would apply them to every target in
+  # the workspace, including Flutter plugin Swift packages, which fail with
+  # "<target> does not support provisioning profiles".
+  update_code_signing_settings(
+    path: "./ios/Runner.xcodeproj",
+    use_automatic_signing: false,
+    targets: ["Runner"],
+    build_configurations: ["Release-#{flavor}"],
+    team_id: team_id,
+    code_sign_identity: CODE_SIGN_IDENTITY_FOR_EXPORT_METHOD[export_method],
+    profile_name: profile_name,
+    bundle_identifier: app_identifier,
+  )
+
   gym(
     workspace: "./ios/Runner.xcworkspace",
-    configuration: "Release",
+    # Must be the flavor's own build configuration. The base "Release" config
+    # keeps Flutter's placeholder PRODUCT_BUNDLE_IDENTIFIER (com.example.*),
+    # so archiving with it silently produces an IPA with the wrong bundle ID
+    # and no matching provisioning profile.
+    configuration: "Release-#{flavor}",
     scheme: scheme,
-    export_method: "app-store",
-    export_options: "./ios/export_options_#{flavor}.plist",
+    export_method: export_method,
+    export_options: export_options,
     output_name: "app-#{flavor}-release.ipa",
     output_directory: "./build/ios/ipa",
   )
