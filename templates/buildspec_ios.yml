@@ -8,7 +8,10 @@ env:
     MATCH_S3_BUCKET: "{{PROJECT_NAME}}-match"
     FL_AWS_REGION: "{{AWS_REGION}}"
     MATCH_KEYCHAIN_NAME: "fastlane_tmp.keychain"
-    MATCH_KEYCHAIN_PASSWORD: ""
+    # Not a secret: this keychain is created empty on a throwaway build host
+    # and discarded with it. Non-empty because set-key-partition-list (which
+    # grants codesign access to the imported key) is unreliable with "".
+    MATCH_KEYCHAIN_PASSWORD: "fastlane_ci"
   secrets-manager:
     FLAVOR: "dev/secret/fastlane:FLAVOR"
     SCHEME: "dev/secret/fastlane:SCHEME"
@@ -38,14 +41,86 @@ phases:
       - export PATH="$HOME/flutter/bin:$PATH"
       - flutter --version
       - export AWS_REGION="${FL_AWS_REGION}"
+      # The CodeBuild agent leaves LOGNAME=root while USER/HOME are cbuser.
+      # Security resolves the keychain search list from the login user, so
+      # anything xcodebuild spawns looks at root's (empty) list and signing
+      # dies with errSecInternalComponent — even though codesign works fine
+      # in this shell. Make LOGNAME agree with the real user.
+      - export LOGNAME="$(id -un)"
+      - echo "LOGNAME=$LOGNAME USER=$USER HOME=$HOME"
       # Match installs the signing certificate into a keychain. The CI user's
       # login keychain is not usable unattended, so use a dedicated one that
       # stays unlocked for the build.
       - |
-        security create-keychain -p "" "$MATCH_KEYCHAIN_NAME" 2>/dev/null || true
-        security default-keychain -s "$MATCH_KEYCHAIN_NAME"
-        security unlock-keychain -p "" "$MATCH_KEYCHAIN_NAME"
-        security set-keychain-settings -t 3600 -u "$MATCH_KEYCHAIN_NAME"
+        KC="$MATCH_KEYCHAIN_NAME"; KCPW="$MATCH_KEYCHAIN_PASSWORD"
+        # Reserved-capacity Mac fleets reuse hosts, so a keychain from an
+        # earlier build can still be here — with an older password, which
+        # makes unlock fail. Always start from a fresh one.
+        security delete-keychain "$KC" 2>/dev/null || true
+        security create-keychain -p "$KCPW" "$KC"
+        # codesign resolves identities through the search list, not the
+        # default keychain. Omitting this fails later with the opaque
+        # "errSecInternalComponent" when signing Flutter.framework.
+        # Use the resolved path: a bare name is not reliably resolved by
+        # other processes reading the search list.
+        KC_PATH="$HOME/Library/Keychains/${KC}-db"
+        LOGIN_KC="$HOME/Library/Keychains/login.keychain-db"
+        if [ -f "$LOGIN_KC" ]; then
+          security list-keychains -d user -s "$KC_PATH" "$LOGIN_KC"
+        else
+          security list-keychains -d user -s "$KC_PATH"
+        fi
+        echo "keychain search list is now:"; security list-keychains -d user
+        # xcodebuild's children resolve the keychain through a different
+        # security session than this shell (codesign succeeds here but fails
+        # inside the archive). Publish the keychain system-wide too.
+        if sudo -n true 2>/dev/null; then
+          sudo security list-keychains -d system -s "$KC_PATH" $(sudo security list-keychains -d system | sed 's/"//g' | xargs) || true
+          echo "system search list:"; sudo security list-keychains -d system
+        else
+          echo "no passwordless sudo; cannot set system keychain search list"
+        fi
+        security default-keychain -s "$KC"
+        security unlock-keychain -p "$KCPW" "$KC"
+        # No -t/-u: never re-lock mid-build. A keychain that auto-locks
+        # part way through surfaces as the same errSecInternalComponent.
+        security set-keychain-settings "$KC"
+      # A brand-new keychain contains no Apple intermediate CA, so the
+      # certificate match imports has an incomplete chain and forms no usable
+      # identity — "There are no local code signing identities found", and
+      # signing then fails with errSecInternalComponent. The intermediates
+      # normally live in the login keychain, which CI does not use.
+      - |
+        for ca in AppleWWDRCAG3 AppleWWDRCAG4 AppleWWDRCAG5 AppleWWDRCAG6; do
+          if curl -fsSL "https://www.apple.com/certificateauthority/${ca}.cer" -o "/tmp/${ca}.cer"; then
+            security import "/tmp/${ca}.cer" -k "$MATCH_KEYCHAIN_NAME" \
+              -T /usr/bin/codesign -T /usr/bin/security 2>/dev/null || true
+          fi
+        done
+      # Ruby's aws-sdk fails TLS to S3 on the CodeBuild macOS image with
+      # "certificate verify failed (unable to get certificate CRL)". Confirm
+      # IAM/network are fine via the AWS CLI, then point Ruby at a known good
+      # CA bundle — the failure is Ruby's OpenSSL trust store, not access.
+      - aws s3 ls "s3://${MATCH_S3_BUCKET}/" --region "${AWS_REGION}" >/dev/null && echo "S3 reachable via AWS CLI"
+      - |
+        curl -fsSL https://curl.se/ca/cacert.pem -o "$HOME/cacert.pem"
+        export SSL_CERT_FILE="$HOME/cacert.pem"
+        export AWS_CA_BUNDLE="$HOME/cacert.pem"
+        echo "OPENSSL_CONF=${OPENSSL_CONF:-<unset>} SSL_CERT_DIR=${SSL_CERT_DIR:-<unset>}"
+        ruby -ropenssl -rnet/http -e '
+          puts "openssl: #{OpenSSL::OPENSSL_VERSION}"
+          puts "default_cert_file: #{OpenSSL::X509::DEFAULT_CERT_FILE} exists=#{File.exist?(OpenSSL::X509::DEFAULT_CERT_FILE)}"
+          puts "default_cert_dir:  #{OpenSSL::X509::DEFAULT_CERT_DIR}"
+          host = "s3.#{ENV["AWS_REGION"]}.amazonaws.com"
+          probe = lambda do |label, &cfg|
+            h = Net::HTTP.new(host, 443); h.use_ssl = true; cfg.call(h)
+            begin; h.start { }; puts "TLS #{label}: OK"
+            rescue => e; puts "TLS #{label}: FAIL #{e.class}: #{e.message}"; end
+          end
+          probe.call("default")               { |_| }
+          probe.call("ca_file=cacert.pem")    { |h| h.ca_file = ENV["AWS_CA_BUNDLE"] }
+          probe.call("VERIFY_NONE(diag only)"){ |h| h.verify_mode = OpenSSL::SSL::VERIFY_NONE }
+        '
       # build_ios only archives — it does not fetch signing assets. Without
       # this the archive fails with "No profiles for '<bundle id>' were
       # found". readonly so CI never creates or revokes certificates.
@@ -53,15 +128,65 @@ phases:
         if [ "$TARGET" = "app_distrib" ]; then MATCH_TYPE=adhoc; else MATCH_TYPE=appstore; fi
         echo "Syncing $MATCH_TYPE signing assets"
         bundle exec fastlane ios sync_certs type:$MATCH_TYPE readonly:true
+      # Grant codesign non-interactive access to the imported key, then assert
+      # a usable identity exists. Failing here points at the real problem
+      # instead of an opaque errSecInternalComponent 3 minutes into the build.
+      - |
+        set -x
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$MATCH_KEYCHAIN_PASSWORD" "$MATCH_KEYCHAIN_NAME" \
+          || echo "WARN: set-key-partition-list failed"
+        set +x
+        security find-identity -v -p codesigning "$MATCH_KEYCHAIN_NAME"
+        if security find-identity -v -p codesigning "$MATCH_KEYCHAIN_NAME" | grep -q "^ *0 valid identities found"; then
+          echo "ERROR: no usable code signing identity in $MATCH_KEYCHAIN_NAME"
+          exit 1
+        fi
+        # Prove codesign can actually use the key before spending three
+        # minutes on an archive that would fail with errSecInternalComponent.
+        IDENTITY_HASH=$(security find-identity -v -p codesigning "$MATCH_KEYCHAIN_NAME" | awk '/\) [0-9A-F]{40} /{print $2; exit}')
+        echo "smoke-testing codesign with identity $IDENTITY_HASH"
+        cp /bin/ls /tmp/codesign_probe
+        # No --keychain: this is how Flutter's tool signs Flutter.framework,
+        # so the identity has to resolve through the search list alone.
+        codesign -f -s "$IDENTITY_HASH" /tmp/codesign_probe \
+          && echo "codesign smoke test OK (search list)" \
+          || { echo "ERROR: codesign cannot resolve the identity via the search list"; exit 1; }
 
   build:
     commands:
       - export PATH="$HOME/flutter/bin:$PATH"
+      # Several minutes elapse between pre_build and the archive's codesign.
+      # Re-assert the keychain state here so a lock or lost ACL shows up as
+      # this explicit check rather than errSecInternalComponent mid-archive.
+      - |
+        security show-keychain-info "$MATCH_KEYCHAIN_NAME" 2>&1 || true
+        security unlock-keychain -p "$MATCH_KEYCHAIN_PASSWORD" "$MATCH_KEYCHAIN_NAME"
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$MATCH_KEYCHAIN_PASSWORD" "$MATCH_KEYCHAIN_NAME" >/dev/null 2>&1 \
+          || echo "WARN: set-key-partition-list failed at build time"
+        cp /bin/ls /tmp/codesign_probe2
+        IDENTITY_HASH=$(security find-identity -v -p codesigning "$MATCH_KEYCHAIN_NAME" | awk '/\) [0-9A-F]{40} /{print $2; exit}')
+        codesign -f -s "$IDENTITY_HASH" /tmp/codesign_probe2 \
+          && echo "codesign still OK at build phase" \
+          || echo "WARN: codesign broken at build phase"
       - bundle exec fastlane ios deploy target:${TARGET} bump:${BUMP} --env ${FASTLANE_ENV}
 
   post_build:
     commands:
       - echo "iOS build completed on $(date)"
+      # gym pipes xcodebuild through xcpretty, which swallows the underlying
+      # error on archive failures. Surface the raw log so CloudWatch alone is
+      # enough to diagnose them.
+      - |
+        for f in "$HOME"/Library/Logs/gym/*.log; do
+          [ -f "$f" ] || continue
+          echo "===== raw xcodebuild log: $f ====="
+          echo "--- script-phase environment (keychain-relevant) ---"
+          grep -nE "^ +export (HOME|USER|LOGNAME|TMPDIR|CODE_SIGN_IDENTITY|EXPANDED_CODE_SIGN_IDENTITY|OTHER_CODE_SIGN_FLAGS)=" "$f" | sort -u | head -20
+          echo "--- failure context ---"
+          grep -n -B8 "errSecInternalComponent" "$f" | tail -40
+        done
       - ls -la build/ios/ipa/ 2>/dev/null || echo "No IPA found"
 
 artifacts:
