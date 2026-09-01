@@ -9,6 +9,17 @@ def sync_certificates(cert_type, readonly)
   s3_bucket = ENV['MATCH_S3_BUCKET']
   aws_region = ENV['AWS_REGION'] || 'eu-central-1'
 
+  # aws-sdk-ruby ignores AWS_CA_BUNDLE (it is a client option, not an env
+  # var, unlike the AWS CLI). Applying it globally lets CI point Ruby at a
+  # working CA bundle — the CodeBuild macOS image's default OpenSSL trust
+  # configuration fails S3 TLS with "certificate verify failed (unable to
+  # get certificate CRL)" even though the AWS CLI connects fine.
+  if ENV['AWS_CA_BUNDLE'] && !ENV['AWS_CA_BUNDLE'].empty?
+    require 'aws-sdk-s3'
+    Aws.config[:ssl_ca_bundle] = ENV['AWS_CA_BUNDLE']
+    UI.message("Using AWS_CA_BUNDLE for aws-sdk TLS: #{ENV['AWS_CA_BUNDLE']}")
+  end
+
   match(
     type: cert_type || "development",
     app_identifier: [app_identifier],
