@@ -96,17 +96,7 @@ def build_ios(version, bump, latest_build_number, latest_version)
     bundle_identifier: app_identifier,
   )
 
-  # Optional escape hatch for CI hosts where the archive's own codesign
-  # cannot reach the keychain (macOS CodeBuild fails Flutter's codesign of
-  # Flutter.framework with errSecInternalComponent even with a valid,
-  # unlocked identity). Archiving unsigned makes Flutter ad-hoc sign with
-  # "-", touching no keychain; the export step then signs properly from the
-  # provisioning profile.
-  skip_archive_codesign = ENV['IOS_SKIP_ARCHIVE_CODESIGN'].to_s == 'true'
-  UI.important("Archiving without codesigning; signing happens at export") if skip_archive_codesign
-
   gym(
-    skip_codesigning: skip_archive_codesign,
     workspace: "./ios/Runner.xcworkspace",
     # Must be the flavor's own build configuration. The base "Release" config
     # keeps Flutter's placeholder PRODUCT_BUNDLE_IDENTIFIER (com.example.*),

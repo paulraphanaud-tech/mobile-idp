@@ -7,9 +7,6 @@ env:
     BUMP: "patch"
     MATCH_S3_BUCKET: "{{PROJECT_NAME}}-match"
     FL_AWS_REGION: "{{AWS_REGION}}"
-    # Archive unsigned and sign at export: the archive's codesign cannot
-    # reach the keychain on this image (errSecInternalComponent).
-    IOS_SKIP_ARCHIVE_CODESIGN: "true"
     MATCH_KEYCHAIN_NAME: "fastlane_tmp.keychain"
     # Deliberately empty. A password-protected keychain does not stay
     # unlocked in CodeBuild's daemon session: only the codesign immediately
