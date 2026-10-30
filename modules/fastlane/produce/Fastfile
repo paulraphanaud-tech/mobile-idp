@@ -2,32 +2,41 @@
 # Module: Produce
 # Provides: create_app_on_asc(name, language)
 #
-# Auth: this lane does NOT use the App Store Connect API key. Apple's public
-# API has no app-creation endpoint — hitting it with an API-key JWT returns
-# "The resource 'apps' does not allow 'CREATE'. Allowed operations are:
-# GET_COLLECTION, GET_INSTANCE, UPDATE". `produce` instead drives the same
-# internal endpoint the App Store Connect website uses, authenticated with a
-# web session, which *does* permit creation.
+# Two steps, two auth paths:
 #
-# That session can be supplied non-interactively via env vars, so this lane
-# runs headlessly (locally and in CI):
+# 1. Bundle ID (Developer Portal) — App Store Connect API key.
+#    `POST /v1/bundleIds` is part of Apple's public API, so the identifier is
+#    registered with the same key match and pilot use (established in the
+#    consuming Fastfile's before_all). Idempotent: an identifier that already
+#    exists is left alone. Without an API key in the lane context this step is
+#    skipped and the identifier must already be registered at
+#    developer.apple.com/account/resources/identifiers.
 #
-#   FASTLANE_USER     — Apple ID (same value as APPLE_USERNAME)
-#   FASTLANE_PASSWORD — Apple ID password
-#   FASTLANE_SESSION  — 2FA session cookie
+#    Not done through `produce`: fastlane 2.241.0 added API-key support to
+#    produce's Developer Portal half (#30158) and 2.241.1 reverted it over
+#    regressions (#30447). Spaceship's BundleId model has supported API keys
+#    for much longer and is what this module calls directly.
 #
-# Generate FASTLANE_SESSION once with:
-#   bundle exec fastlane spaceauth -u <apple-id>
-# It prompts for the 2FA code on your device, then prints a YAML cookie
-# string to export. It is valid for roughly 30 days, after which the lane
-# fails with UnauthorizedAccessError and you re-run spaceauth. Store all
-# three in fastlane/env.secret locally and in Secrets Manager for CI.
+# 2. App record (App Store Connect) — Apple ID web session.
+#    Apple's public API has no app-creation endpoint — hitting it with an
+#    API-key JWT returns "The resource 'apps' does not allow 'CREATE'. Allowed
+#    operations are: GET_COLLECTION, GET_INSTANCE, UPDATE". `produce` instead
+#    drives the same internal endpoint the App Store Connect website uses,
+#    authenticated with a web session, which *does* permit creation.
 #
-# skip_devcenter is set below: Bundle ID registration on the Developer
-# Portal is a separate one-time step with no automatable equivalent, so
-# register the identifier at
-# developer.apple.com/account/resources/identifiers first, then this lane
-# creates only the App Store Connect record.
+#    That session can be supplied non-interactively via env vars, so this
+#    step runs headlessly (locally and in CI):
+#
+#      FASTLANE_USER     — Apple ID (same value as APPLE_USERNAME)
+#      FASTLANE_PASSWORD — Apple ID password
+#      FASTLANE_SESSION  — 2FA session cookie
+#
+#    Generate FASTLANE_SESSION once with:
+#      bundle exec fastlane spaceauth -u <apple-id>
+#    It prompts for the 2FA code on your device, then prints a YAML cookie
+#    string to export. It is valid for roughly 30 days, after which the lane
+#    fails with UnauthorizedAccessError and you re-run spaceauth. Store all
+#    three in fastlane/env.secret locally and in Secrets Manager for CI.
 # =============================================================================
 
 def create_app_on_asc(name, language)
@@ -35,9 +44,11 @@ def create_app_on_asc(name, language)
   app_name = name || ENV['APP_NAME']
   team_id = ENV['APPLE_TEAM_ID']
 
-  # Authenticated by FASTLANE_USER/PASSWORD/SESSION, not the ASC API key
-  # established in before_all — see module note above.
+  register_bundle_id_with_api_key(app_identifier, app_name, team_id)
 
+  # produce logs in with FASTLANE_USER/PASSWORD/SESSION, replacing the API-key
+  # client set above — see module note. skip_devcenter because step 1 already
+  # handled the bundle ID.
   produce(
     username: ENV['APPLE_USERNAME'],
     app_identifier: app_identifier,
@@ -50,4 +61,41 @@ def create_app_on_asc(name, language)
   )
 
   UI.message("App '#{app_name}' (#{app_identifier}) created on App Store Connect!")
+end
+
+def register_bundle_id_with_api_key(app_identifier, app_name, team_id)
+  api_key = lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]
+  unless api_key
+    UI.important("No App Store Connect API key in lane context; skipping bundle ID registration. " \
+                 "'#{app_identifier}' must already exist on the Developer Portal.")
+    return
+  end
+
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
+
+  existing = Spaceship::ConnectAPI::BundleId.find(app_identifier)
+  if existing
+    UI.success("Bundle ID '#{app_identifier}' already registered (#{existing.name}), nothing to do on the Developer Portal")
+    return
+  end
+
+  # The portal rejects names containing anything but letters, digits and
+  # spaces (no '-', '.', '&', apostrophes...).
+  portal_name = app_name.to_s.gsub(/[^A-Za-z0-9 ]/, ' ').squeeze(' ').strip
+  portal_name = app_identifier.gsub(/[^A-Za-z0-9]/, ' ').squeeze(' ').strip if portal_name.empty?
+
+  UI.message("Registering bundle ID '#{app_identifier}' as '#{portal_name}' on the Developer Portal")
+  begin
+    Spaceship::ConnectAPI::BundleId.create(
+      name: portal_name,
+      platform: Spaceship::ConnectAPI::BundleIdPlatform::IOS,
+      identifier: app_identifier,
+      seed_id: team_id
+    )
+  rescue Spaceship::AccessForbiddenError, Spaceship::UnauthorizedAccessError => e
+    UI.user_error!("The App Store Connect API key was refused when registering '#{app_identifier}': #{e.message}. " \
+                   "Its role may not allow creating identifiers — register it at " \
+                   "developer.apple.com/account/resources/identifiers, or use a key with a broader role.")
+  end
+  UI.success("Bundle ID '#{app_identifier}' registered")
 end

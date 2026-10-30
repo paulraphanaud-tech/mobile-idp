@@ -148,7 +148,7 @@ Ask: "Do you already have an App Store Connect API Key (.p8 file)?"
 8. Wait for them to provide Key ID, Issuer ID, and the path to the `.p8` file
 9. Read the `.p8` file content and store it for `env.secret`
 
-Note for later: this API key covers Match (certs/profiles) and TestFlight uploads, but Apple's public API has **no app-creation endpoint** (`POST /v1/apps` returns "The resource 'apps' does not allow 'CREATE'"). The `create_app` lane therefore authenticates with an Apple ID **web session** instead, which does permit creation — see Step 3d. Bundle ID registration on the Developer Portal remains manual (no automatable equivalent).
+Note for later: this API key covers Match (certs/profiles) and TestFlight uploads, but Apple's public API has **no app-creation endpoint** (`POST /v1/apps` returns "The resource 'apps' does not allow 'CREATE'"). The `create_app` lane therefore authenticates with an Apple ID **web session** instead, which does permit creation — see Step 3d. Bundle ID registration on the Developer Portal *does* use this key: `create_app` registers the identifier through `POST /v1/bundleIds` before creating the record, and skips it if it already exists.
 
 ### 3c. iOS Certificates (Match)
 
@@ -161,7 +161,7 @@ Ask:
 
 ### 3d. Apple ID web session (for the `create_app` lane)
 
-Only needed if they want `make create-app` / `fastlane ios create_app` to create the App Store Connect record for them. Apple's API key cannot do this (`apps` does not allow `CREATE`); `produce` uses an Apple ID web session, which can.
+Only needed if they want `make create-app` / `fastlane ios create_app` to create the App Store Connect record for them. The lane registers the bundle ID with the API key from 3b, but the app record itself cannot use it (`apps` does not allow `CREATE`); `produce` uses an Apple ID web session, which can.
 
 Explain, then collect:
 1. Tell them to run, in a **real terminal** (needs a TTY for the 2FA code — it will not work through a non-interactive shell):
