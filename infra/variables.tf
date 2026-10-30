@@ -7,9 +7,38 @@ variable "project_name" {
 }
 
 variable "environment" {
-  description = "Environment name (dev, staging, prod)"
+  description = "Environment name (dev, staging, prod). Selects the Secrets Manager path prefix, and — when include_environment_in_resource_names is true — is part of every resource name."
   type        = string
   default     = "dev"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{0,15}$", var.environment))
+    error_message = "environment must be lowercase alphanumeric with hyphens, max 16 chars (it becomes part of S3 bucket and IAM role names)."
+  }
+}
+
+variable "include_environment_in_resource_names" {
+  description = <<-EOT
+    Whether AWS resource names include the environment: `<project>-<env>-match`
+    instead of `<project>-match`.
+
+    Defaults to false, which is the historical behaviour and means two
+    environments in the same AWS account COLLIDE — S3 bucket names are globally
+    unique and IAM role names are account-unique, so the second `terraform
+    apply` fails on duplicates.
+
+    Set it to true for any project that runs more than one environment in a
+    single AWS account. Do this at creation time: flipping it on an existing
+    deployment renames every resource, which Terraform implements as
+    destroy-and-recreate. The match and keystore buckets have
+    force_destroy = false, so that apply errors out half-way rather than
+    deleting signing material — recoverable, but a bad afternoon.
+
+    Leave it false if each environment gets its own AWS account (the stronger
+    isolation boundary, where identical names are fine).
+  EOT
+  type        = bool
+  default     = false
 }
 
 variable "tags" {
@@ -85,20 +114,18 @@ variable "enable_approval" {
 # Secrets
 # =============================================================================
 variable "secret_definitions" {
-  description = "Map of secret paths to create in AWS Secrets Manager"
+  description = <<-EOT
+    Override for the Secrets Manager paths to create.
+
+    Leave empty (the default) to use the per-environment paths derived from
+    var.environment in main.tf: `<env>/fastlane/config`,
+    `<env>/fastlane/credentials`, `<env>/android/signing`,
+    `<env>/android/play_store`.
+
+    Only set this if you need paths that do not follow that scheme — and if
+    you do, `secret_path()` in scripts/setup.sh must be changed to match, or
+    `make populate-secrets` writes to paths CodeBuild is not reading.
+  EOT
   type        = map(object({ description = string }))
-  default = {
-    "dev/secret/fastlane" = {
-      description = "Fastlane app config (FLAVOR, SCHEME, Firebase App IDs)"
-    }
-    "secret/env/fastlane" = {
-      description = "Fastlane credentials (Firebase CLI token, ASC keys)"
-    }
-    "prod/android/signing" = {
-      description = "Android keystore signing credentials"
-    }
-    "prod/android/play_store" = {
-      description = "Google Play service account JSON key"
-    }
-  }
+  default     = {}
 }

@@ -14,16 +14,16 @@ env:
     # next one fails with errSecInternalComponent. An empty-password keychain
     # needs no unlocking, so signing keeps working for the whole archive.
     MATCH_KEYCHAIN_PASSWORD: ""
-  secrets-manager:
-    FLAVOR: "dev/secret/fastlane:FLAVOR"
-    SCHEME: "dev/secret/fastlane:SCHEME"
-    FIREBASE_APP_IOS: "dev/secret/fastlane:FIREBASE_APP_IOS"
-    APP_STORE_TESTER_GROUP: "dev/secret/fastlane:APP_STORE_TESTER_GROUP"
-    FIREBASE_CLI_TOKEN: "secret/env/fastlane:FIREBASE_CLI_TOKEN"
-    APP_STORE_CONNECT_API_KEY_KEY_ID: "secret/env/fastlane:APP_STORE_CONNECT_KEY_ID"
-    APP_STORE_CONNECT_API_KEY_ISSUER_ID: "secret/env/fastlane:APP_STORE_CONNECT_ISSUER_ID"
-    APP_STORE_CONNECT_API_KEY_KEY: "secret/env/fastlane:APP_STORE_CONNECT_KEY_CONTENT"
-    MATCH_PASSWORD: "secret/env/fastlane:MATCH_PASSWORD"
+  # No `secrets-manager:` block here on purpose. That section is a static
+  # mapping with no variable expansion, so it cannot name an environment-
+  # specific path like "staging/fastlane/credentials" — and one repo has one
+  # buildspec but several environments. The CodeBuild *project* injects every
+  # secret instead (see `secrets_manager_variables` in infra/main.tf), which
+  # keeps the paths env-aware and keeps one source of truth.
+  #
+  # Project-level environment variables also override the `variables:` block
+  # here, so FASTLANE_ENV and the bucket names above are defaults for a
+  # manual run, not what CI actually uses.
 
 phases:
   install:

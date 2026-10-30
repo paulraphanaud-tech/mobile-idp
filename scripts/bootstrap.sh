@@ -311,13 +311,16 @@ generate_files() {
   mkdir -p "$PROJECT_DIR/infra/environments/staging"
   mkdir -p "$PROJECT_DIR/infra/environments/prod"
 
-  cp "$TEMPLATES_DIR/infra/environments/dev/terraform.tfvars" "$PROJECT_DIR/infra/environments/dev/terraform.tfvars"
-  replace_placeholders "$PROJECT_DIR/infra/environments/dev/terraform.tfvars"
-  echo -e "${GREEN}[OK] infra/environments/dev/terraform.tfvars${NC}"
-
-  cp "$TEMPLATES_DIR/infra/environments/dev/backend.tf" "$PROJECT_DIR/infra/environments/dev/backend.tf"
-  replace_placeholders "$PROJECT_DIR/infra/environments/dev/backend.tf"
-  echo -e "${GREEN}[OK] infra/environments/dev/backend.tf${NC}"
+  # All three environments, not just dev: `make infra-init ENV=staging` reads
+  # environments/staging/backend.tf, and a missing file is a confusing failure
+  # three weeks after bootstrap rather than now.
+  for env in dev staging prod; do
+    for f in terraform.tfvars backend.tf; do
+      cp "$TEMPLATES_DIR/infra/environments/$env/$f" "$PROJECT_DIR/infra/environments/$env/$f"
+      replace_placeholders "$PROJECT_DIR/infra/environments/$env/$f"
+      echo -e "${GREEN}[OK] infra/environments/$env/$f${NC}"
+    done
+  done
 
   # --- Terraform main files (symlink or copy from modules) ---
   local tf_source="$PROJECT_DIR/$MODULES_PATH/terraform"
@@ -399,8 +402,8 @@ print_summary() {
   echo -e "  Makefile"
   echo -e "  buildspec.yaml"
   echo -e "  buildspec_ios.yml"
-  echo -e "  infra/environments/dev/terraform.tfvars"
-  echo -e "  infra/environments/dev/backend.tf"
+  echo -e "  infra/environments/{dev,staging,prod}/terraform.tfvars"
+  echo -e "  infra/environments/{dev,staging,prod}/backend.tf"
   echo -e "  infra/*.tf"
   echo -e "  scripts/setup.sh"
   echo -e ""
