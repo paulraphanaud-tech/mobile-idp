@@ -3,12 +3,21 @@ set -euo pipefail
 
 # =============================================================================
 # IDP Setup Script
-# Checks prerequisites and populates AWS Secrets Manager
+# Checks prerequisites, populates AWS Secrets Manager, and audits secret age.
+#
+#   scripts/setup.sh check                  Verify local tooling
+#   scripts/setup.sh populate-secrets [env] Write secret values (interactive)
+#   scripts/setup.sh secrets-audit [env]    Report age / rotation status
+#
+# See docs/secrets.md for what each secret holds, its blast radius if leaked,
+# and the recommended rotation cadence.
 # =============================================================================
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 # =============================================================================
@@ -30,6 +39,21 @@ secret_path() {
     *) echo "unknown secret kind: $kind" >&2; return 1 ;;
   esac
 }
+
+# Recommended maximum age in days before a secret should be re-issued.
+# 0 means "no rotation expected" (config, not a credential).
+# Rationale for each value is in docs/secrets.md.
+secret_max_age_days() {
+  case "$1" in
+    fastlane_config) echo 0 ;;
+    fastlane_creds)  echo 90 ;;
+    android_signing) echo 365 ;;
+    play_store)      echo 90 ;;
+    *) echo 0 ;;
+  esac
+}
+
+SECRET_KINDS=(fastlane_config fastlane_creds android_signing play_store)
 
 # =============================================================================
 # Prerequisites
@@ -117,6 +141,8 @@ cmd_populate_secrets() {
     echo -e "${RED}jq is required. Install it and re-run.${NC}"; exit 1; }
 
   echo "Populating secrets for environment: $env (region: $region)"
+  echo -e "${YELLOW}Values are written straight to AWS Secrets Manager. See"
+  echo -e "docs/secrets.md for blast radius and rotation cadence.${NC}"
   echo ""
 
   # --- Fastlane app config (not credentials) ---
@@ -217,6 +243,108 @@ cmd_populate_secrets() {
 
   echo ""
   echo -e "${GREEN}All secrets populated.${NC}"
+  echo -e "Verify with: ${BOLD}make secrets-audit ENV=$env${NC}"
+}
+
+# =============================================================================
+# secrets-audit
+# =============================================================================
+
+# AWS CLI v2 returns an ISO-8601 timestamp; v1 returns a float epoch. Handle
+# both. On macOS the timezone suffix is dropped, which is at most a few hours
+# of error on a value reported in whole days.
+to_epoch() {
+  local ts="$1"
+  if [[ "$ts" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    # Truncate rather than printf '%.0f': under a locale whose decimal
+    # separator is a comma (fr_FR and friends), printf rejects "1769696000.12"
+    # as an invalid number and returns 0.
+    echo "${ts%%.*}"
+    return
+  fi
+  if date -d "$ts" +%s 2>/dev/null; then
+    return
+  fi
+  date -j -f "%Y-%m-%dT%H:%M:%S" "${ts%%.*}" +%s 2>/dev/null || echo ""
+}
+
+cmd_secrets_audit() {
+  local env="${1:-dev}"
+  local region="${AWS_REGION:-eu-west-1}"
+  local now; now="$(date +%s)"
+  local stale=0
+
+  echo -e "${BLUE}${BOLD}Secrets audit — environment: $env, region: $region${NC}"
+  echo ""
+  printf "%-28s %10s %8s %9s  %s\n" "SECRET" "AGE(days)" "MAX" "ROTATION" "STATUS"
+  printf "%-28s %10s %8s %9s  %s\n" "----------------------------" "----------" "--------" "---------" "------"
+
+  for kind in "${SECRET_KINDS[@]}"; do
+    local path max_age desc
+    path="$(secret_path "$kind" "$env")"
+    max_age="$(secret_max_age_days "$kind")"
+
+    if ! desc="$(aws secretsmanager describe-secret \
+        --secret-id "$path" --region "$region" 2>/dev/null)"; then
+      printf "%-28s %10s %8s %9s  ${RED}%s${NC}\n" \
+        "$path" "-" "$max_age" "-" "NOT FOUND"
+      continue
+    fi
+
+    local changed rotation last_accessed age_days status color
+    changed="$(jq -r '.LastChangedDate // empty' <<<"$desc")"
+    rotation="$(jq -r 'if .RotationEnabled then "on" else "off" end' <<<"$desc")"
+    last_accessed="$(jq -r '.LastAccessedDate // "never"' <<<"$desc")"
+
+    if [ -z "$changed" ]; then
+      # Created by Terraform but put-secret-value never ran: the secret exists
+      # with no value, and any CodeBuild project referencing it fails at start.
+      printf "%-28s %10s %8s %9s  ${RED}%s${NC}\n" \
+        "$path" "-" "$max_age" "$rotation" "EMPTY — never populated"
+      stale=1
+      continue
+    fi
+
+    local changed_epoch; changed_epoch="$(to_epoch "$changed")"
+    if [ -z "$changed_epoch" ]; then
+      printf "%-28s %10s %8s %9s  %s\n" \
+        "$path" "?" "$max_age" "$rotation" "could not parse $changed"
+      continue
+    fi
+
+    age_days=$(( (now - changed_epoch) / 86400 ))
+
+    if [ "$max_age" -eq 0 ]; then
+      status="n/a (config, not a credential)"; color="$GREEN"
+    elif [ "$age_days" -gt "$max_age" ]; then
+      status="STALE — re-issue and re-populate"; color="$RED"; stale=1
+    elif [ "$age_days" -gt $(( max_age * 3 / 4 )) ]; then
+      status="due soon"; color="$YELLOW"
+    else
+      status="ok"; color="$GREEN"
+    fi
+
+    printf "%-28s %10s %8s %9s  ${color}%s${NC}\n" \
+      "$path" "$age_days" "$max_age" "$rotation" "$status"
+    printf "%-28s %s\n" "" "last changed: $changed"
+    printf "%-28s %s\n" "" "last read by CI: $last_accessed"
+  done
+
+  echo ""
+  echo "MAX = recommended maximum age in days (0 = no rotation expected)."
+  echo "Rationale per secret, and what to do when one goes stale:"
+  echo "  docs/secrets.md"
+  echo ""
+  echo "Who changed a secret and when is not in this output — Secrets Manager"
+  echo "does not record it. Query CloudTrail for the audit trail:"
+  echo -e "  ${BOLD}aws cloudtrail lookup-events \\"
+  echo -e "    --lookup-attributes AttributeKey=EventName,AttributeValue=PutSecretValue \\"
+  echo -e "    --region $region${NC}"
+
+  if [ "$stale" -eq 1 ]; then
+    echo ""
+    echo -e "${YELLOW}One or more secrets need attention.${NC}"
+  fi
 }
 
 # =============================================================================
@@ -229,8 +357,11 @@ case "${1:-check}" in
   populate-secrets)
     cmd_populate_secrets "${2:-dev}"
     ;;
+  secrets-audit|secrets-status)
+    cmd_secrets_audit "${2:-dev}"
+    ;;
   *)
-    echo "Usage: $0 {check|populate-secrets [env]}"
+    echo "Usage: $0 {check|populate-secrets [env]|secrets-audit [env]}"
     exit 1
     ;;
 esac

@@ -62,10 +62,16 @@ infra-output:
 # =============================================================================
 # Secrets (populate after infra-apply)
 # =============================================================================
-.PHONY: populate-secrets
+.PHONY: populate-secrets secrets-audit
 
 populate-secrets:
 	@bash scripts/setup.sh populate-secrets $(ENV)
+
+# Read-only. Reports how old each secret is against its recommended rotation
+# cadence, and flags secrets Terraform created but nobody ever populated —
+# CodeBuild fails at startup on those, before any build phase runs.
+secrets-audit:
+	@bash scripts/setup.sh secrets-audit $(ENV)
 
 # =============================================================================
 # Flutter
@@ -200,6 +206,7 @@ help:
 	@echo "                          to type 'apply <ENV>'; AUTO_APPROVE=1 skips the prompt)"
 	@echo "  infra-destroy           DESTRUCTIVE. Asks you to type 'destroy <project>-<ENV>'"
 	@echo "  populate-secrets        Populate Secrets Manager values"
+	@echo "  secrets-audit           Report secret age vs. rotation cadence (read-only)"
 	@echo ""
 	@echo "Build:"
 	@echo "  build-android           Build Android APK"
