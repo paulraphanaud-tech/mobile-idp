@@ -151,7 +151,10 @@ Provide a verification checklist:
 - [ ] App Store Connect API key created and stored
 - [ ] Match S3 bucket created
 - [ ] Certificates synced: `bundle exec fastlane ios sync_certs`
-- [ ] App created on ASC (if needed): `bundle exec fastlane ios create_app`
+- [ ] App created on ASC (if needed): `make create-app`
+      Irreversible — ASC records cannot be deleted and the app name is unique
+      across Apple's entire store. The target prompts for the confirmation
+      phrase `create <bundle-id>`; the user types it, never the agent.
 - [ ] Secrets configured in `env.secret` (local) or Secrets Manager (CI)
 - [ ] Test build: `bundle exec fastlane ios build`
 - [ ] Test deployment: `bundle exec fastlane ios deploy target:app_distrib`

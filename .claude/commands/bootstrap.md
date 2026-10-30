@@ -453,8 +453,10 @@ Remaining steps (in order):
 
   1. Provision infrastructure:
      cd {TARGET_PATH}
-     make infra-plan        # Review what will be created
-     make infra-apply       # Create AWS + GCP resources
+     make infra-init        # One-time, wires up the remote state backend
+     make infra-plan        # Review what will be created — read it in full
+     make infra-apply       # Re-plans, shows it, then asks you to type
+                            # 'apply dev' before creating anything
 
   2. After infra-apply — get Firebase App IDs (if created by Terraform):
      make infra-output
@@ -476,7 +478,9 @@ Remaining steps (in order):
      b. App Store Connect record — automated, needs FASTLANE_SESSION from
         Step 3d:
         make create-app                     # uses env.dev / APP_IDENTIFIER
-        FASTLANE_ENV=prod make create-app   # for the prod flavor
+        ENV=prod make create-app            # for the prod flavor
+        This is irreversible — ASC records cannot be deleted. The target
+        asks you to type 'create <bundle-id>' first.
         App Store names are globally unique — if it errors with "The App
         Name you entered is already being used", pass a different one:
         bundle exec fastlane ios create_app name:"Some Other Name"
