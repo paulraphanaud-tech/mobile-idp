@@ -9,19 +9,50 @@ TRACK ?= internal
 
 # =============================================================================
 # Infrastructure (Terraform)
+#
+# infra-apply and infra-destroy are gated by scripts/confirm.sh. See CLAUDE.md,
+# "Blast radius and confirmation gates", for which targets are safe to repeat
+# and which need a human. AI agents must never set CONFIRM or AUTO_APPROVE.
 # =============================================================================
 .PHONY: infra-init infra-plan infra-apply infra-destroy infra-output
+
+# Name of the project actually described by this environment's tfvars, so the
+# destroy phrase names the real target rather than a guess.
+PROJECT_NAME ?= $(shell sed -n 's/^[[:space:]]*project_name[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' infra/environments/$(ENV)/terraform.tfvars 2>/dev/null)
+TARGET_NAME = $(if $(PROJECT_NAME),$(PROJECT_NAME),unknown-project)-$(ENV)
+
+# Saved plan, relative to infra/. Applied verbatim so that what gets applied is
+# exactly what was reviewed — not a re-plan that may have drifted since.
+PLAN_FILE = .terraform-plan-$(ENV).tfplan
 
 infra-init:
 	cd infra && terraform init -backend-config=environments/$(ENV)/backend.tf
 
 infra-plan:
-	cd infra && terraform plan -var-file=environments/$(ENV)/terraform.tfvars
+	cd infra && terraform plan -var-file=environments/$(ENV)/terraform.tfvars -out=$(PLAN_FILE)
 
-infra-apply:
-	cd infra && terraform apply -var-file=environments/$(ENV)/terraform.tfvars
+# Depends on infra-plan: the full plan is always printed, unpiped and
+# untruncated, immediately above the confirmation prompt.
+infra-apply: infra-plan
+	@echo ""
+	@echo "Review the full plan printed above before continuing."
+	@if [ "$(AUTO_APPROVE)" = "1" ]; then \
+		echo "AUTO_APPROVE=1 — applying without review. Intended for pipelines only."; \
+	else \
+		bash scripts/confirm.sh "apply $(ENV)" \
+			"About to apply the plan above to '$(TARGET_NAME)'." \
+			"This creates or modifies real AWS and Firebase resources."; \
+	fi
+	cd infra && terraform apply $(PLAN_FILE)
 
 infra-destroy:
+	@bash scripts/confirm.sh "destroy $(TARGET_NAME)" \
+		"DESTRUCTIVE: terraform destroy on environment '$(ENV)'." \
+		"Deletes CodeBuild projects, the Mac fleet, CodePipeline, IAM roles," \
+		"the CodeStar connection and the Secrets Manager entries for $(ENV)." \
+		"S3 buckets have force_destroy=false, so destroy will FAIL while the" \
+		"match / keystore buckets still hold objects — signing material is not" \
+		"silently deleted, but everything else is."
 	cd infra && terraform destroy -var-file=environments/$(ENV)/terraform.tfvars
 
 infra-output:
@@ -85,13 +116,25 @@ deploy-ios-testflight:
 # =============================================================================
 .PHONY: sync-certs sync-certs-appstore create-app
 
+# Bundle ID for this environment, so the create-app gate names the identifier
+# that is actually about to be claimed on App Store Connect.
+APP_IDENTIFIER ?= $(shell sed -n 's/^[[:space:]]*APP_IDENTIFIER[[:space:]]*=[[:space:]]*//p' fastlane/env.$(ENV) 2>/dev/null | head -1)
+APP_ID_OR_UNKNOWN = $(if $(APP_IDENTIFIER),$(APP_IDENTIFIER),unknown-bundle-id)
+
 sync-certs:
 	bundle exec fastlane ios sync_certs type:development
 
 sync-certs-appstore:
 	bundle exec fastlane ios sync_certs type:appstore
 
+# Gated: App Store Connect records cannot be deleted, and the app name is
+# unique across the whole store — a wrong one is permanent.
 create-app:
+	@bash scripts/confirm.sh "create $(APP_ID_OR_UNKNOWN)" \
+		"Registers the bundle ID on the Developer Portal (API key) if missing," \
+		"then creates a PERMANENT App Store Connect record for $(APP_ID_OR_UNKNOWN)." \
+		"ASC apps cannot be deleted, and the app name is globally unique across" \
+		"Apple's store — nobody, including you, can reuse it afterwards."
 	bundle exec fastlane ios create_app
 
 # =============================================================================
@@ -99,7 +142,14 @@ create-app:
 # =============================================================================
 .PHONY: generate-keystore upload-keystore download-keystore
 
+# Gated: a new keystore for an app already published under the old one makes
+# every future upload rejected by Play ("not signed by the upload key").
 generate-keystore:
+	@bash scripts/confirm.sh "generate keystore $(ENV)" \
+		"Generates a NEW Android signing keystore for env '$(ENV)'." \
+		"If this app is already on the Play Store, uploads signed with a new key" \
+		"are rejected and the only recovery is a Play support key reset." \
+		"Set KEYSTORE_OVERWRITE=true as well to replace a keystore that exists."
 	bundle exec fastlane android generate_keystore
 
 upload-keystore:
@@ -140,8 +190,9 @@ help:
 	@echo "Infrastructure:"
 	@echo "  infra-init              Initialize Terraform"
 	@echo "  infra-plan              Preview infrastructure changes"
-	@echo "  infra-apply             Apply infrastructure changes"
-	@echo "  infra-destroy           Destroy infrastructure"
+	@echo "  infra-apply             Apply infrastructure (plans, shows it, then asks you"
+	@echo "                          to type 'apply <ENV>'; AUTO_APPROVE=1 skips the prompt)"
+	@echo "  infra-destroy           DESTRUCTIVE. Asks you to type 'destroy <project>-<ENV>'"
 	@echo "  populate-secrets        Populate Secrets Manager values"
 	@echo ""
 	@echo "Build:"
@@ -157,10 +208,14 @@ help:
 	@echo "Signing:"
 	@echo "  sync-certs              Sync development certificates (Match)"
 	@echo "  sync-certs-appstore     Sync App Store certificates (Match)"
-	@echo "  create-app              Create app on App Store Connect"
-	@echo "  generate-keystore       Generate Android keystore"
+	@echo "  create-app              IRREVERSIBLE. Creates a permanent App Store Connect record"
+	@echo "  generate-keystore       IRREVERSIBLE. Generates a new Android signing keystore"
 	@echo "  upload-keystore         Upload keystore to S3"
 	@echo ""
 	@echo "Setup:"
 	@echo "  install                 Install Ruby/Fastlane dependencies"
 	@echo "  setup                   Full first-time setup"
+	@echo ""
+	@echo "Gated targets (infra-apply, infra-destroy, create-app, generate-keystore)"
+	@echo "prompt for a confirmation phrase. See CLAUDE.md, \"Blast radius and"
+	@echo "confirmation gates\". Agents must not answer these prompts for you."

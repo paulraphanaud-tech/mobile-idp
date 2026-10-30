@@ -353,6 +353,12 @@ generate_files() {
     echo -e "${YELLOW}[SKIP] scripts/setup.sh already exists${NC}"
   fi
 
+  if [ -f "$IDP_ROOT/scripts/confirm.sh" ]; then
+    cp "$IDP_ROOT/scripts/confirm.sh" "$PROJECT_DIR/scripts/confirm.sh"
+    chmod +x "$PROJECT_DIR/scripts/confirm.sh"
+    echo -e "${GREEN}[OK] scripts/confirm.sh${NC}"
+  fi
+
   if [ -f "$IDP_ROOT/scripts/generate-keystore.sh" ]; then
     cp "$IDP_ROOT/scripts/generate-keystore.sh" "$PROJECT_DIR/scripts/generate-keystore.sh"
     chmod +x "$PROJECT_DIR/scripts/generate-keystore.sh"
@@ -366,6 +372,13 @@ generate_files() {
     "fastlane/report.xml"
     "fastlane/README.md"
     "*.keystore"
+    "*.jks"
+    # Saved terraform plans are not encrypted and can contain resolved
+    # variable values — see `make infra-plan`.
+    "*.tfplan"
+    ".terraform/"
+    "*.tfstate"
+    "*.tfstate.*"
   )
 
   if [ -f "$gitignore" ]; then
@@ -406,6 +419,7 @@ print_summary() {
   echo -e "  infra/environments/{dev,staging,prod}/backend.tf"
   echo -e "  infra/*.tf"
   echo -e "  scripts/setup.sh"
+  echo -e "  scripts/confirm.sh"
   echo -e ""
   echo -e "${YELLOW}Next steps:${NC}"
   echo -e ""

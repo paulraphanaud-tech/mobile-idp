@@ -19,6 +19,18 @@ def generate_android_keystore
 
   dname = "CN=#{cn}, OU=#{ou}, O=#{o}, L=#{l}, ST=#{st}, C=#{c}"
 
+  # Refuse to clobber an existing keystore. Losing the upload key of a
+  # published app is unrecoverable without a Play support key reset: every
+  # subsequent upload is rejected with "not signed by the upload key".
+  # Overwriting has to be asked for explicitly.
+  if File.exist?(keystore_path) && ENV['KEYSTORE_OVERWRITE'] != 'true'
+    UI.user_error!(
+      "Keystore already exists at #{keystore_path}. Refusing to overwrite it — " \
+      "if this app is published, replacing the key breaks all future uploads. " \
+      "Re-run with KEYSTORE_OVERWRITE=true if you really mean to replace it."
+    )
+  end
+
   sh(
     "keytool -genkeypair -v " \
     "-keystore #{keystore_path} " \
