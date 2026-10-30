@@ -113,6 +113,22 @@ data "aws_iam_policy_document" "codebuild_policy" {
     }
   }
 
+  # CloudFront invalidation for the feature flag document.
+  #
+  # Scoped to the one distribution: CreateInvalidation on "*" would let a build
+  # invalidate any distribution in the account, and there is no reason for a
+  # mobile build to be able to do that.
+  dynamic "statement" {
+    for_each = var.flags_distribution_arn != "" ? [1] : []
+
+    content {
+      sid       = "FlagsCloudFrontInvalidation"
+      effect    = "Allow"
+      actions   = ["cloudfront:CreateInvalidation"]
+      resources = [var.flags_distribution_arn]
+    }
+  }
+
   # CodeArtifact — emitted only when a domain and repositories are supplied.
   #
   # The previous version of this granted these actions on "*" unconditionally.

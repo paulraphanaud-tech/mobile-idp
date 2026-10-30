@@ -27,10 +27,10 @@ def build_android(version, bump)
   build_name, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
 
   if build_format == 'aab'
-    sh("flutter build appbundle --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}")
+    sh("flutter build appbundle --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}#{dart_defines}")
     UI.message("Successfully built AAB!")
   else
-    sh("flutter build apk --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}")
+    sh("flutter build apk --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}#{dart_defines}")
     UI.message("Successfully built APK!")
   end
 end

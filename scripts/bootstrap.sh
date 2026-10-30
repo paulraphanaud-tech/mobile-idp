@@ -89,6 +89,7 @@ replace_placeholders() {
       -e "s|{{FIREBASE_APP_ANDROID}}|$FIREBASE_APP_ANDROID|g" \
       -e "s|{{FIREBASE_APP_IOS}}|$FIREBASE_APP_IOS|g" \
       -e "s|{{MODULES_PATH}}|$MODULES_PATH|g" \
+      -e "s|{{FEATURE_FLAGS_BACKEND}}|$FEATURE_FLAGS_BACKEND|g" \
       "$file"
   else
     sed -i \
@@ -106,6 +107,7 @@ replace_placeholders() {
       -e "s|{{FIREBASE_APP_ANDROID}}|$FIREBASE_APP_ANDROID|g" \
       -e "s|{{FIREBASE_APP_IOS}}|$FIREBASE_APP_IOS|g" \
       -e "s|{{MODULES_PATH}}|$MODULES_PATH|g" \
+      -e "s|{{FEATURE_FLAGS_BACKEND}}|$FEATURE_FLAGS_BACKEND|g" \
       "$file"
   fi
 }
@@ -536,7 +538,7 @@ generate_files() {
 
   # Called by both buildspecs; a generated project without it fails the build
   # at the install phase.
-  for s in supply-chain.sh build-metrics.sh codegen.sh; do
+  for s in supply-chain.sh build-metrics.sh codegen.sh flags.sh; do
     cp "$TEMPLATES_DIR/scripts/$s" "$PROJECT_DIR/scripts/$s"
     # codegen.sh embeds {{MODULES_PATH}} so it can find idp_codegen.
     replace_placeholders "$PROJECT_DIR/scripts/$s"
@@ -614,6 +616,7 @@ print_summary() {
   echo -e "  scripts/supply-chain.sh"
   echo -e "  scripts/build-metrics.sh"
   echo -e "  scripts/codegen.sh"
+  echo -e "  scripts/flags.sh"
   echo -e "  flags/flags.yaml"
   echo -e "  analytics/events.yaml"
   echo -e "  design/tokens.json"
@@ -662,6 +665,18 @@ print_summary() {
   echo -e "       analytics/events.yaml   analytics events"
   echo -e "       design/tokens.json      colours, spacing, type scale"
   echo -e ""
+
+  if [ "$FEATURE_FLAGS_BACKEND" = "aws" ]; then
+    echo -e "  9. After infra-apply, put the flag document URL in fastlane/env.dev:"
+    echo -e "     ${BOLD}make infra-output ENV=dev | grep flags_document_url${NC}"
+    echo -e "     then ${BOLD}make flags-plan ENV=dev${NC} and ${BOLD}make flags-publish ENV=dev${NC}"
+    echo -e ""
+  elif [ "$FEATURE_FLAGS_BACKEND" = "firebase" ]; then
+    echo -e "  9. Point firebase.json at the rendered template:"
+    echo -e "     ${BOLD}\"remoteconfig\": { \"template\": \"remoteconfig.template.json\" }${NC}"
+    echo -e "     then ${BOLD}make flags-plan ENV=dev${NC} and ${BOLD}make flags-publish ENV=dev${NC}"
+    echo -e ""
+  fi
 }
 
 # =============================================================================

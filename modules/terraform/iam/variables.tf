@@ -75,6 +75,21 @@ variable "metrics_namespace" {
   default     = "MobileIDP"
 }
 
+variable "flags_distribution_arn" {
+  description = <<-EOT
+    Optional. ARN of the CloudFront distribution serving the feature flag
+    document. Grants CodeBuild cloudfront:CreateInvalidation on that one
+    distribution, so `make flags-publish` can drop the cached copy instead of
+    waiting out the TTL.
+
+    Empty by default: a project that does not use the AWS flag backend gets no
+    CloudFront permissions at all. Publishing to S3 itself needs nothing extra
+    — the flag bucket is passed in through s3_bucket_arns.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all IAM resources"
   type        = map(string)

@@ -145,3 +145,58 @@ variable "secret_definitions" {
   type        = map(object({ description = string }))
   default     = {}
 }
+
+# =============================================================================
+# Feature flags
+# =============================================================================
+
+variable "feature_flags_backend" {
+  description = <<-EOT
+    Where the app reads feature flags from.
+
+      "none"      No flag infrastructure. The app uses the defaults compiled
+                  into the binary from flags.yaml. Perfectly workable for a
+                  project that is not ready to run rollouts yet.
+
+      "aws"       Provisions an S3 bucket and a CloudFront distribution serving
+                  the document generated from flags.yaml. No credentials ship in
+                  the app; targeting and percentage rollouts are evaluated on
+                  device. `make flags-publish` writes to it.
+
+      "firebase"  Uses Firebase Remote Config. Provisions nothing here —
+                  Remote Config lives on the Firebase project the firebase
+                  module already enables — and `make flags-publish` deploys the
+                  rendered template with the Firebase CLI.
+
+    The choice is not permanent: both backends read the same flags.yaml, so
+    switching is a re-publish plus a one-line change to which FlagSource the app
+    constructs.
+  EOT
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "aws", "firebase"], var.feature_flags_backend)
+    error_message = "feature_flags_backend must be one of: none, aws, firebase."
+  }
+}
+
+variable "flags_cache_ttl_seconds" {
+  description = <<-EOT
+    How long CloudFront serves the flag document before revalidating with S3.
+    Only used when feature_flags_backend = "aws".
+
+    This bounds how fast a flag change reaches a device, so it is effectively
+    how quickly a kill switch takes effect. `make flags-publish` invalidates
+    the path as well, so the TTL mainly limits staleness at edges the
+    invalidation has not reached.
+  EOT
+  type        = number
+  default     = 60
+}
+
+variable "flags_price_class" {
+  description = "CloudFront price class for the flag distribution. Only used when feature_flags_backend = \"aws\"."
+  type        = string
+  default     = "PriceClass_100"
+}

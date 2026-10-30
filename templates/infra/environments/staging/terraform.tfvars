@@ -17,6 +17,21 @@ enable_approval      = true
 # infra/variables.tf before flipping it on an existing deployment.
 include_environment_in_resource_names = false
 
+# Where the app reads feature flags from.
+#
+#   "none"      No flag infrastructure; the app uses the defaults compiled in
+#               from flags/flags.yaml.
+#   "aws"       An S3 bucket behind CloudFront serving the document rendered
+#               from flags.yaml. No credentials in the app; targeting and
+#               percentage rollouts are evaluated on device.
+#   "firebase"  Firebase Remote Config. Provisions nothing here. Note that
+#               Remote Config is per Firebase PROJECT, so environments sharing
+#               one project share one set of flag values.
+#
+# Switching later is a re-publish plus changing which FlagSource the app
+# constructs — both backends read the same flags.yaml.
+feature_flags_backend = "{{FEATURE_FLAGS_BACKEND}}"
+
 tags = {
   Environment = "staging"
   Team        = "mobile"

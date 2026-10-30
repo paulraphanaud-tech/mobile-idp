@@ -67,3 +67,29 @@ output "firebase_ios_app_id" {
   description = "Firebase iOS App ID"
   value       = module.firebase.firebase_ios_app_id
 }
+
+# =============================================================================
+# Feature flags
+#
+# All null unless feature_flags_backend = "aws".
+# =============================================================================
+
+output "flags_document_url" {
+  description = "URL the app reads flags from. Build it into the app as FLAGS_URL (see fastlane/env.<env>)."
+  value       = try(module.feature_flags[0].document_url, null)
+}
+
+output "flags_bucket_name" {
+  description = "Bucket `make flags-publish` writes the document to"
+  value       = try(module.feature_flags[0].bucket_name, null)
+}
+
+output "flags_distribution_id" {
+  description = "CloudFront distribution invalidated after a publish"
+  value       = try(module.feature_flags[0].distribution_id, null)
+}
+
+output "feature_flags_backend" {
+  description = "Which flag backend this environment is configured for. scripts/flags.sh reads it to decide where to publish."
+  value       = var.feature_flags_backend
+}

@@ -3,6 +3,8 @@
 # Shared helpers for all Fastlane modules
 # =============================================================================
 
+require 'shellwords'
+
 def in_project_root(&block)
   Dir.chdir(File.expand_path("../../..", __dir__), &block)
 end
@@ -51,4 +53,49 @@ def compute_next_version(version, bump, latest_build_number, latest_version)
   UI.success("Next build will be #{build_version}+#{build_number}")
 
   return build_version, build_number
+end
+
+# =============================================================================
+# Dart defines
+#
+# Compile-time configuration the app reads with String.fromEnvironment. Used for
+# values that must be fixed in the binary rather than fetched — the feature flag
+# document URL is the main one, because the app needs it before it can fetch
+# anything.
+#
+# Only non-secret identifiers belong here. A --dart-define is embedded in the
+# binary in plain text and is trivially recoverable from a downloaded APK or
+# IPA, so it is configuration, not a secret. Credentials stay in Secrets
+# Manager and never reach a build command.
+# =============================================================================
+
+# Environment variables forwarded into the build as --dart-define, mapped to
+# the name the app reads. Unset variables are skipped rather than passed empty,
+# so String.fromEnvironment's defaultValue applies.
+DART_DEFINE_VARS = {
+  'FLAGS_URL' => 'FLAGS_URL',
+  'FLAGS_BACKEND' => 'FLAGS_BACKEND',
+  'ENVIRONMENT' => 'ENVIRONMENT',
+  'APP_ENV' => 'APP_ENV'
+}.freeze
+
+def dart_defines
+  extra = (ENV['EXTRA_DART_DEFINES'] || '').split(',').map(&:strip).reject(&:empty?)
+
+  defines = DART_DEFINE_VARS.filter_map do |env_name, define_name|
+    value = ENV[env_name]
+    next if value.nil? || value.empty?
+
+    "--dart-define=#{define_name}=#{Shellwords.escape(value)}"
+  end
+
+  # EXTRA_DART_DEFINES carries already-formed KEY=VALUE pairs for anything the
+  # map above does not cover, so a project can add its own without editing the
+  # IDP module.
+  defines += extra.map { |pair| "--dart-define=#{Shellwords.escape(pair)}" }
+
+  return '' if defines.empty?
+
+  UI.message("Dart defines: #{defines.map { |d| d.split('=').first(2).join('=') }.join(' ')}")
+  " #{defines.join(' ')}"
 end

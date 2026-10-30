@@ -96,9 +96,12 @@ flutter-test:
 # flags/flags.yaml, analytics/events.yaml and design/tokens.json are the source
 # of truth; lib/generated/ is derived from them and is committed so that a
 # checkout builds without running the generator first.
+#
+# Everything here is read-only or local except flags-publish. See CLAUDE.md,
+# "Blast radius and confirmation gates".
 # =============================================================================
 .PHONY: codegen codegen-check validate-registries \
-        flags-codegen flags-validate \
+        flags-codegen flags-validate flags-audit flags-plan flags-publish \
         analytics-codegen analytics-validate \
         design-tokens design-tokens-check
 
@@ -122,6 +125,24 @@ flags-codegen:
 
 flags-validate:
 	@bash scripts/codegen.sh flags validate
+
+# Read-only. Lists flags past their expiry date and flags with no date at all.
+flags-audit:
+	@bash scripts/flags.sh audit
+
+# Read-only. Renders flags.yaml for ENV and diffs it against what the backend
+# currently serves. Always run this before flags-publish.
+flags-plan:
+	@bash scripts/flags.sh plan $(ENV)
+
+# Publishes to the backend. Shows the same diff as flags-plan first.
+#
+# ENV=prod additionally asks you to type 'publish flags prod': a flag change
+# reaches installed apps within the CDN TTL, with no build and no app store
+# review in between. It is recoverable — the bucket is versioned and Remote
+# Config keeps template history — but users see it first.
+flags-publish:
+	@bash scripts/flags.sh publish $(ENV)
 
 analytics-codegen:
 	@bash scripts/codegen.sh events codegen
@@ -257,6 +278,10 @@ help:
 	@echo "  codegen                 Regenerate lib/generated/ from all three registries"
 	@echo "  codegen-check           Fail if generated code is stale (CI)"
 	@echo "  validate-registries     Lint all three registries without generating"
+	@echo "  flags-audit             Report flags past their expiry date (read-only)"
+	@echo "  flags-plan              Diff flags.yaml against the live backend (read-only)"
+	@echo "  flags-publish           Publish flags to ENV. ENV=prod asks you to type"
+	@echo "                          'publish flags prod' — it reaches users with no build"
 	@echo "  design-tokens           Regenerate the theme from design/tokens.json"
 	@echo ""
 	@echo "Build:"
@@ -280,6 +305,7 @@ help:
 	@echo "  install                 Install Ruby/Fastlane dependencies"
 	@echo "  setup                   Full first-time setup"
 	@echo ""
-	@echo "Gated targets (infra-apply, infra-destroy, create-app, generate-keystore)"
+	@echo "Gated targets (infra-apply, infra-destroy, create-app, generate-keystore,"
+	@echo "flags-publish ENV=prod)"
 	@echo "prompt for a confirmation phrase. See CLAUDE.md, \"Blast radius and"
 	@echo "confirmation gates\". Agents must not answer these prompts for you."

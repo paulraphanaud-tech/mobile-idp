@@ -70,6 +70,25 @@ module "secrets" {
 }
 
 # =============================================================================
+# Feature flag distribution (AWS backend only)
+#
+# Created only when feature_flags_backend = "aws". The "firebase" backend needs
+# no AWS resources — Remote Config lives on the Firebase project the firebase
+# module already enables — and "none" means the app runs on the defaults
+# compiled into the binary.
+# =============================================================================
+module "feature_flags" {
+  source = "../modules/terraform/feature_flags"
+  count  = var.feature_flags_backend == "aws" ? 1 : 0
+
+  project_name      = local.name_prefix
+  environment       = var.environment
+  cache_ttl_seconds = var.flags_cache_ttl_seconds
+  price_class       = var.flags_price_class
+  tags              = var.tags
+}
+
+# =============================================================================
 # IAM Roles (CodeBuild + CodePipeline)
 # =============================================================================
 module "iam" {
@@ -78,12 +97,16 @@ module "iam" {
   project_name = local.name_prefix
 
   # CodeBuild needs all three: match certs, the keystore, and the input
-  # artifact CodePipeline hands it.
-  s3_bucket_arns = [
-    module.s3.match_bucket_arn,
-    module.s3.keystore_bucket_arn,
-    module.s3.artifacts_bucket_arn,
-  ]
+  # artifact CodePipeline hands it — plus the flag bucket when that backend is
+  # in use, so `make flags-publish` can write the document from a build.
+  s3_bucket_arns = concat(
+    [
+      module.s3.match_bucket_arn,
+      module.s3.keystore_bucket_arn,
+      module.s3.artifacts_bucket_arn,
+    ],
+    module.feature_flags[*].bucket_arn,
+  )
 
   # CodePipeline gets this one and nothing else.
   artifacts_bucket_arn = module.s3.artifacts_bucket_arn
@@ -91,6 +114,10 @@ module "iam" {
   secrets_arns            = module.secrets.secret_arns
   codestar_connection_arn = aws_codestarconnections_connection.github.arn
   metrics_namespace       = var.metrics_namespace
+
+  # Empty string when the AWS flag backend is off, which emits no CloudFront
+  # permissions at all.
+  flags_distribution_arn = try(module.feature_flags[0].distribution_arn, "")
 
   tags = var.tags
 }
@@ -124,6 +151,15 @@ module "codebuild" {
     PROJECT_NAME      = var.project_name
     METRICS_NAMESPACE = var.metrics_namespace
     METRICS_ENABLED   = tostring(var.metrics_namespace != "")
+
+    # Feature flags. FLAGS_URL is what the app is built with; the bucket and
+    # distribution are what `make flags-publish` writes to and invalidates.
+    # All three are empty strings under the firebase and none backends, which
+    # is what scripts/flags.sh checks before trying to publish.
+    FLAGS_BACKEND         = var.feature_flags_backend
+    FLAGS_BUCKET          = try(module.feature_flags[0].bucket_name, "")
+    FLAGS_DISTRIBUTION_ID = try(module.feature_flags[0].distribution_id, "")
+    FLAGS_URL             = try(module.feature_flags[0].document_url, "")
   }
 
   # This block, not the buildspec, is where secrets are wired in. A buildspec's
