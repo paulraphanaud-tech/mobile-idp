@@ -62,6 +62,17 @@ phases:
     commands:
       - export PATH="/opt/flutter/bin:$PATH"
       - flutter --version
+      # Registry guards, before anything expensive.
+      #
+      # validate catches a misspelled rule condition that would silently target
+      # everyone, a GA4-reserved event name that would never be recorded, and a
+      # colour token that breaks the ColorScheme.
+      #
+      # codegen-check fails when a registry was edited without regenerating.
+      # Without it the build compiles the *old* generated code and everything
+      # passes, which is the failure mode that wastes an afternoon.
+      - bash scripts/codegen.sh validate
+      - bash scripts/codegen.sh check
       - |
         echo "Downloading keystore from S3..."
         mkdir -p android/app/keystore

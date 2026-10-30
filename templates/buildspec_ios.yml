@@ -60,6 +60,10 @@ phases:
       - flutter pub get
       - bash scripts/supply-chain.sh sbom ios
       - bash scripts/supply-chain.sh scan ios
+      # Same registry guards as the Android build — see buildspec.yaml for why
+      # each one exists.
+      - bash scripts/codegen.sh validate
+      - bash scripts/codegen.sh check
       - export AWS_REGION="${FL_AWS_REGION}"
       # The agent leaves LOGNAME=root while USER/HOME are cbuser. The build
       # itself runs as cbuser (verified via ownership of the archive output),

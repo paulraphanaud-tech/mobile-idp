@@ -187,6 +187,31 @@ collect_info() {
   ask "GitHub repo (owner/repo)" GITHUB_REPO "$default_github_repo"
 
   echo ""
+  echo -e "${YELLOW}=== Platform features ===${NC}"
+  echo ""
+  echo "Feature flags: where does the app read flag values from?"
+  echo "  1) none     — defaults compiled in from flags.yaml only (add a backend later)"
+  echo "  2) aws      — S3 + CloudFront document; targeting evaluated on device"
+  echo "  3) firebase — Remote Config (note: per Firebase project, not per environment)"
+  echo ""
+  ask_choice "Choice" FLAGS_CHOICE "1/2/3" "1"
+
+  case "$FLAGS_CHOICE" in
+    2) FEATURE_FLAGS_BACKEND="aws" ;;
+    3) FEATURE_FLAGS_BACKEND="firebase" ;;
+    *) FEATURE_FLAGS_BACKEND="none" ;;
+  esac
+
+  echo ""
+  echo -n -e "${BOLD}Include the Firebase Analytics sink? (Y/n)${NC}: "
+  read -r reply
+  if [[ "$reply" =~ ^[Nn]$ ]]; then
+    INCLUDE_FIREBASE_ANALYTICS="false"
+  else
+    INCLUDE_FIREBASE_ANALYTICS="true"
+  fi
+
+  echo ""
   echo -e "${YELLOW}=== Module Integration ===${NC}"
   echo ""
 
@@ -231,6 +256,14 @@ integrate_modules() {
     mkdir -p "$PROJECT_DIR/modules"
     cp -r "$IDP_ROOT/modules/fastlane" "$PROJECT_DIR/modules/fastlane"
     cp -r "$IDP_ROOT/modules/terraform" "$PROJECT_DIR/modules/terraform"
+    cp -r "$IDP_ROOT/modules/flutter" "$PROJECT_DIR/modules/flutter"
+
+    # Resolved package metadata and build output from the IDP checkout are not
+    # this project's, and a stale package_config.json makes the copied packages
+    # fail to resolve here.
+    find "$PROJECT_DIR/modules/flutter" \
+      \( -name ".dart_tool" -o -name "build" -o -name ".packages" \) \
+      -maxdepth 2 -exec rm -rf {} + 2>/dev/null || true
 
     echo -e "${GREEN}[OK] Modules copied to modules/${NC}"
 
@@ -241,6 +274,140 @@ integrate_modules() {
 # =============================================================================
 # Generate files from templates
 # =============================================================================
+
+# Copies a template only when the destination does not exist, then substitutes
+# placeholders. Used for files a team owns and edits — registries, the
+# composition root — where clobbering is worse than being out of date.
+generate_registry() {
+  local dest="$1"
+  local src="$2"
+
+  mkdir -p "$PROJECT_DIR/$(dirname "$dest")"
+
+  if [ -f "$PROJECT_DIR/$dest" ]; then
+    echo -e "${YELLOW}[SKIP] $dest already exists${NC}"
+    return 0
+  fi
+
+  cp "$src" "$PROJECT_DIR/$dest"
+  replace_placeholders "$PROJECT_DIR/$dest"
+  echo -e "${GREEN}[OK] $dest${NC}"
+}
+
+# Adds the IDP Flutter packages as path dependencies.
+#
+# Inserted directly after the "dependencies:" key rather than appended, because
+# appending would land inside dev_dependencies or a trailing block. Skipped
+# entirely if idp_analytics is already there, so re-running is safe.
+wire_pubspec() {
+  local pubspec="$PROJECT_DIR/pubspec.yaml"
+
+  if [ ! -f "$pubspec" ]; then
+    echo -e "${YELLOW}[SKIP] no pubspec.yaml — add the IDP packages manually${NC}"
+    return 0
+  fi
+
+  if grep -q "idp_analytics:" "$pubspec"; then
+    echo -e "${YELLOW}[SKIP] pubspec.yaml already references the IDP packages${NC}"
+    return 0
+  fi
+
+  if ! grep -qE "^dependencies:" "$pubspec"; then
+    echo -e "${YELLOW}[SKIP] pubspec.yaml has no dependencies: block${NC}"
+    return 0
+  fi
+
+  local deps_file
+  deps_file="$(mktemp)"
+  {
+    echo "  # --- IDP platform packages (added by bootstrap) ---"
+    echo "  idp_analytics:"
+    echo "    path: $MODULES_PATH/flutter/idp_analytics"
+    echo "  idp_analytics_flutter:"
+    echo "    path: $MODULES_PATH/flutter/idp_analytics_flutter"
+    if [ "$INCLUDE_FIREBASE_ANALYTICS" = "true" ]; then
+      echo "  idp_analytics_firebase:"
+      echo "    path: $MODULES_PATH/flutter/idp_analytics_firebase"
+    fi
+    echo "  idp_feature_flags:"
+    echo "    path: $MODULES_PATH/flutter/idp_feature_flags"
+    case "$FEATURE_FLAGS_BACKEND" in
+      aws)
+        echo "  idp_feature_flags_aws:"
+        echo "    path: $MODULES_PATH/flutter/idp_feature_flags_aws"
+        ;;
+      firebase)
+        echo "  idp_feature_flags_firebase:"
+        echo "    path: $MODULES_PATH/flutter/idp_feature_flags_firebase"
+        ;;
+    esac
+  } > "$deps_file"
+
+  awk -v deps="$deps_file" '
+    { print }
+    /^dependencies:[[:space:]]*$/ && !done {
+      while ((getline line < deps) > 0) print line
+      close(deps)
+      done = 1
+    }
+  ' "$pubspec" > "$pubspec.idp.tmp" && mv "$pubspec.idp.tmp" "$pubspec"
+
+  rm -f "$deps_file"
+  echo -e "${GREEN}[OK] pubspec.yaml — IDP packages added${NC}"
+}
+
+# The IDP packages live inside the project tree (as a submodule at ci-cd/ or
+# copied to modules/), so `flutter analyze` would descend into them and report
+# hundreds of errors about dependencies that are resolved in their own
+# directories rather than this one.
+wire_analysis_options() {
+  local file="$PROJECT_DIR/analysis_options.yaml"
+  local exclude_path="$MODULES_PATH"
+  exclude_path="${exclude_path%%/*}"
+
+  if [ ! -f "$file" ]; then
+    cat > "$file" <<EOF
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    # The IDP packages are analyzed in their own directories, not here.
+    - $exclude_path/**
+    #
+    # lib/generated/ is deliberately NOT excluded. Those files carry
+    # "ignore_for_file: type=lint", which silences style lints while leaving
+    # real type errors visible. Excluding them would hide a registry change
+    # that no longer compiles.
+EOF
+    echo -e "${GREEN}[OK] analysis_options.yaml${NC}"
+    return 0
+  fi
+
+  if grep -q "$exclude_path/\*\*" "$file"; then
+    echo -e "${YELLOW}[SKIP] analysis_options.yaml already excludes $exclude_path/${NC}"
+    return 0
+  fi
+
+  echo -e "${YELLOW}[MANUAL] add \"$exclude_path/**\" to analyzer.exclude in analysis_options.yaml${NC}"
+  echo -e "         otherwise \`flutter analyze\` descends into the IDP packages."
+}
+
+# Best-effort first generation, so lib/generated/ exists before the first build.
+# A failure here is not fatal: the project may not have Dart on PATH yet, and
+# `make codegen` does the same thing later.
+run_initial_codegen() {
+  if ! command -v dart >/dev/null 2>&1; then
+    echo -e "${YELLOW}[SKIP] dart not on PATH — run 'make codegen' once Flutter is installed${NC}"
+    return 0
+  fi
+
+  if (cd "$PROJECT_DIR" && bash scripts/codegen.sh all >/dev/null 2>&1); then
+    echo -e "${GREEN}[OK] lib/generated/ (flags, events, design tokens)${NC}"
+  else
+    echo -e "${YELLOW}[WARN] initial codegen failed — run 'make codegen' and read the errors${NC}"
+  fi
+}
 
 generate_files() {
   echo ""
@@ -342,6 +509,20 @@ generate_files() {
     echo -e "${GREEN}[OK] infra/main.tf module paths updated${NC}"
   fi
 
+  # --- Registries (flags, analytics events, design tokens) ---
+  #
+  # Never overwritten. These are the files a team edits constantly, and a
+  # re-run of bootstrap must not silently revert a month of flag definitions.
+  generate_registry "flags/flags.yaml" "$TEMPLATES_DIR/flags/flags.yaml"
+  generate_registry "analytics/events.yaml" "$TEMPLATES_DIR/analytics/events.yaml"
+  generate_registry "design/tokens.json" "$TEMPLATES_DIR/design/tokens.json"
+
+  # --- Composition root ---
+  #
+  # Also never overwritten: it is a starting point the project owns and edits,
+  # not generated code.
+  generate_registry "lib/idp.dart" "$TEMPLATES_DIR/lib/idp.dart"
+
   # --- Scripts ---
   mkdir -p "$PROJECT_DIR/scripts"
 
@@ -355,8 +536,9 @@ generate_files() {
 
   # Called by both buildspecs; a generated project without it fails the build
   # at the install phase.
-  for s in supply-chain.sh build-metrics.sh; do
+  for s in supply-chain.sh build-metrics.sh codegen.sh; do
     cp "$TEMPLATES_DIR/scripts/$s" "$PROJECT_DIR/scripts/$s"
+    # codegen.sh embeds {{MODULES_PATH}} so it can find idp_codegen.
     replace_placeholders "$PROJECT_DIR/scripts/$s"
     chmod +x "$PROJECT_DIR/scripts/$s"
     echo -e "${GREEN}[OK] scripts/$s${NC}"
@@ -431,6 +613,14 @@ print_summary() {
   echo -e "  scripts/confirm.sh"
   echo -e "  scripts/supply-chain.sh"
   echo -e "  scripts/build-metrics.sh"
+  echo -e "  scripts/codegen.sh"
+  echo -e "  flags/flags.yaml"
+  echo -e "  analytics/events.yaml"
+  echo -e "  design/tokens.json"
+  echo -e "  lib/idp.dart"
+  echo -e "  lib/generated/{flags,events,design_tokens}.g.dart"
+  echo -e ""
+  echo -e "Feature flag backend: ${BOLD}$FEATURE_FLAGS_BACKEND${NC}"
   echo -e ""
   echo -e "${YELLOW}Next steps:${NC}"
   echo -e ""
@@ -461,6 +651,17 @@ print_summary() {
   echo -e "     ${BOLD}make build-android${NC}"
   echo -e "     ${BOLD}make build-ios${NC}"
   echo -e ""
+  echo -e "  8. Wire up the platform services:"
+  echo -e "     - uncomment the backends you chose in ${BOLD}lib/idp.dart${NC}"
+  echo -e "     - call ${BOLD}Idp.initialize(...)${NC} before runApp"
+  echo -e "     - pass ${BOLD}AppTheme.light${NC} / ${BOLD}AppTheme.dark${NC} to MaterialApp"
+  echo -e "     - ${BOLD}flutter pub get${NC}"
+  echo -e ""
+  echo -e "     Edit the registries, then ${BOLD}make codegen${NC} and commit the result:"
+  echo -e "       flags/flags.yaml        feature flags"
+  echo -e "       analytics/events.yaml   analytics events"
+  echo -e "       design/tokens.json      colours, spacing, type scale"
+  echo -e ""
 }
 
 # =============================================================================
@@ -472,4 +673,7 @@ preflight
 collect_info
 integrate_modules
 generate_files
+wire_pubspec
+wire_analysis_options
+run_initial_codegen
 print_summary

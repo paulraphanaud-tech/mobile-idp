@@ -1,0 +1,75 @@
+# =============================================================================
+# Feature flags for {{PROJECT_NAME}}
+#
+# This file is the source of truth. The backend is downstream of it:
+#
+#   make flags-codegen          -> lib/generated/flags.g.dart (typed constants)
+#   make flags-plan  ENV=dev    -> shows what publishing would change
+#   make flags-publish ENV=dev  -> pushes it to the backend
+#
+# Editing flags in a backend console instead means the next publish silently
+# reverts your change. That is the intended behaviour: the repo wins, so a flag
+# state is reviewable, attributable and revertable like any other code change.
+#
+# Every flag needs:
+#   key         snake_case; used verbatim as the backend key
+#   type        bool | string | int | double | json
+#   default     compiled into the binary — see the warning below
+#   owner       who removes this flag
+#   expires     when it should be gone (make flags-audit reports overdue ones)
+#
+# THE DEFAULT IS NOT A PLACEHOLDER. It is what users get before the first fetch
+# completes, whenever the device is offline, and whenever a published value
+# fails to decode. Choose the safe value: for a kill switch that is "feature on,
+# kill switch not pulled".
+# =============================================================================
+
+flags:
+  - key: new_checkout
+    type: bool
+    default: false
+    description: Routes checkout through the rebuilt flow.
+    owner: payments
+    expires: 2026-12-31
+    environments:
+      dev: true
+      staging: true
+      # A worked example of a staged rollout. Rules are evaluated in order and
+      # the first match wins; a rule whose rollout excludes this device falls
+      # through to the next rule, not to the value above.
+      prod:
+        value: false
+        rules:
+          # Internal team first — no percentage, so all of them.
+          - when:
+              user_id: [alice@example.com, bob@example.com]
+            value: true
+          # Then a quarter of iOS users on a version that has the new screens.
+          - when:
+              platform: [ios]
+              min_app_version: "2.1.0"
+            rollout:
+              percentage: 25
+            value: true
+
+  - key: checkout_timeout_seconds
+    type: int
+    default: 30
+    min: 5
+    max: 120
+    description: Network timeout for the payment call. Raise it if the payment
+      provider is degraded; min/max stop a typo from setting it to zero.
+    owner: payments
+    expires: 2027-06-30
+    environments:
+      dev: 60
+
+  - key: promo_banner_variant
+    type: string
+    default: none
+    allowed_values: [none, summer, winter]
+    description: Which promotional banner the home screen shows. A value
+      outside allowed_values is rejected on device and falls back to "none",
+      so a console typo cannot blank the screen.
+    owner: growth
+    expires: 2026-11-30

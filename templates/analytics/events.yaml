@@ -1,0 +1,86 @@
+# =============================================================================
+# Analytics event registry for {{PROJECT_NAME}}
+#
+#   make analytics-codegen  -> lib/generated/events.g.dart (one class per event)
+#   make analytics-validate -> checks names, parameters and vendor limits
+#
+# Why a registry rather than string literals at call sites:
+#
+#   * a misspelled event name is a silent gap in a dashboard that nobody
+#     notices for weeks — here it is a compile error
+#   * renaming an event is a refactor, not a grep
+#   * the limits below are GA4's, and GA4 enforces them by *silently dropping*
+#     what breaks them; checking here means finding out at build time
+#
+# Limits enforced by `make analytics-validate`:
+#   event name      snake_case, <= 40 chars, not firebase_/google_/ga_ prefixed
+#   parameters      <= 25 per event, names snake_case and <= 40 chars
+#
+# Do not put personal data in parameters. Event parameters land in GA4 and
+# BigQuery, are retained on the vendor's schedule rather than yours, and cannot
+# be selectively deleted for one user afterwards.
+# =============================================================================
+
+events:
+  - name: app_opened
+    description: First frame shown after a cold start.
+    owner: platform
+    parameters:
+      - name: launch_source
+        type: string
+        description: How the app was opened.
+        allowed_values: [icon, notification, deep_link]
+
+  - name: checkout_started
+    description: User tapped the checkout call to action.
+    owner: payments
+    parameters:
+      - name: cart_value
+        type: double
+        required: true
+        description: Total cart value in the user's currency, major units.
+      - name: currency
+        type: string
+        required: true
+        description: ISO 4217 code, e.g. EUR.
+      - name: item_count
+        type: int
+        required: true
+      - name: coupon_code
+        type: string
+        description: Omitted entirely when no coupon was applied — optional
+          parameters are left out rather than sent as null, because vendors
+          disagree about what a null means.
+
+  - name: checkout_completed
+    description: Payment confirmed by the provider.
+    owner: payments
+    parameters:
+      - name: cart_value
+        type: double
+        required: true
+      - name: currency
+        type: string
+        required: true
+      - name: payment_method
+        type: string
+        required: true
+        allowed_values: [card, apple_pay, google_pay]
+
+  - name: flag_exposed
+    description: A feature flag was read and acted on. Emitted from the
+      FeatureFlags onExposure hook, once per flag and value per session. This
+      is what makes an experiment measurable — without it you know who was
+      bucketed, which includes everyone who never reached the screen.
+    owner: platform
+    parameters:
+      - name: flag_key
+        type: string
+        required: true
+      - name: flag_value
+        type: string
+        required: true
+      - name: flag_source
+        type: string
+        description: Which source won — remote_config, aws, override, or
+          default. Makes "why did this user see that?" answerable.

@@ -91,6 +91,51 @@ flutter-test:
 	flutter test
 
 # =============================================================================
+# Registries: feature flags, analytics events, design tokens
+#
+# flags/flags.yaml, analytics/events.yaml and design/tokens.json are the source
+# of truth; lib/generated/ is derived from them and is committed so that a
+# checkout builds without running the generator first.
+# =============================================================================
+.PHONY: codegen codegen-check validate-registries \
+        flags-codegen flags-validate \
+        analytics-codegen analytics-validate \
+        design-tokens design-tokens-check
+
+# Regenerate everything. Run after editing any registry, and commit the result.
+codegen:
+	@bash scripts/codegen.sh all
+
+# CI guard: fails when a registry was edited without regenerating. Both
+# buildspecs run this before the build.
+codegen-check:
+	@bash scripts/codegen.sh check
+
+# Registry linting without generating. Catches a misspelled rule condition that
+# would silently target everyone, a GA4-reserved event name that would never be
+# recorded, and a colour token that breaks the ColorScheme.
+validate-registries:
+	@bash scripts/codegen.sh validate
+
+flags-codegen:
+	@bash scripts/codegen.sh flags codegen
+
+flags-validate:
+	@bash scripts/codegen.sh flags validate
+
+analytics-codegen:
+	@bash scripts/codegen.sh events codegen
+
+analytics-validate:
+	@bash scripts/codegen.sh events validate
+
+design-tokens:
+	@bash scripts/codegen.sh tokens codegen
+
+design-tokens-check:
+	@bash scripts/codegen.sh tokens check
+
+# =============================================================================
 # Android - Fastlane
 # =============================================================================
 .PHONY: build-android deploy-android-firebase deploy-android-play-store
@@ -207,6 +252,12 @@ help:
 	@echo "  infra-destroy           DESTRUCTIVE. Asks you to type 'destroy <project>-<ENV>'"
 	@echo "  populate-secrets        Populate Secrets Manager values"
 	@echo "  secrets-audit           Report secret age vs. rotation cadence (read-only)"
+	@echo ""
+	@echo "Registries (flags / analytics / design tokens):"
+	@echo "  codegen                 Regenerate lib/generated/ from all three registries"
+	@echo "  codegen-check           Fail if generated code is stale (CI)"
+	@echo "  validate-registries     Lint all three registries without generating"
+	@echo "  design-tokens           Regenerate the theme from design/tokens.json"
 	@echo ""
 	@echo "Build:"
 	@echo "  build-android           Build Android APK"
