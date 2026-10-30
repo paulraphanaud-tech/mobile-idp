@@ -66,6 +66,15 @@ variable "codestar_connection_arn" {
   default     = ""
 }
 
+variable "metrics_namespace" {
+  description = <<-EOT
+    CloudWatch namespace that CodeBuild may publish custom metrics to
+    (scripts/build-metrics.sh). Set to "" to grant no metric permissions.
+  EOT
+  type        = string
+  default     = "MobileIDP"
+}
+
 variable "tags" {
   description = "Tags to apply to all IAM resources"
   type        = map(string)

@@ -111,6 +111,22 @@ variable "enable_approval" {
 }
 
 # =============================================================================
+# Observability
+# =============================================================================
+variable "metrics_namespace" {
+  description = <<-EOT
+    CloudWatch namespace for the build metrics emitted by
+    scripts/build-metrics.sh (BuildDurationSeconds, LeadTimeSeconds).
+
+    Set to "" to disable: CodeBuild then gets no cloudwatch:PutMetricData
+    permission and the scripts skip publishing. Timings are still printed to
+    the build log either way.
+  EOT
+  type        = string
+  default     = "MobileIDP"
+}
+
+# =============================================================================
 # Secrets
 # =============================================================================
 variable "secret_definitions" {

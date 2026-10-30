@@ -90,6 +90,7 @@ module "iam" {
 
   secrets_arns            = module.secrets.secret_arns
   codestar_connection_arn = aws_codestarconnections_connection.github.arn
+  metrics_namespace       = var.metrics_namespace
 
   tags = var.tags
 }
@@ -107,6 +108,7 @@ module "codebuild" {
 
   environment_variables = {
     FASTLANE_ENV    = var.environment
+    ENVIRONMENT     = var.environment
     MATCH_S3_BUCKET = module.s3.match_bucket_name
     # Two names for one bucket: buildspec.yaml reads S3_BUCKET_NAME, while
     # modules/fastlane/keystore reads S3_KEYSTORE_BUCKET. Setting both means
@@ -116,6 +118,12 @@ module "codebuild" {
     # Where scripts/supply-chain.sh uploads SBOM and vulnerability reports,
     # under supply-chain/<platform>/<build-id>/.
     ARTIFACTS_BUCKET = module.s3.artifacts_bucket_name
+    # Build instrumentation (scripts/build-metrics.sh). PROJECT_NAME is the
+    # real project, not the prefixed one, so a series stays comparable when
+    # include_environment_in_resource_names is switched on.
+    PROJECT_NAME      = var.project_name
+    METRICS_NAMESPACE = var.metrics_namespace
+    METRICS_ENABLED   = tostring(var.metrics_namespace != "")
   }
 
   # This block, not the buildspec, is where secrets are wired in. A buildspec's

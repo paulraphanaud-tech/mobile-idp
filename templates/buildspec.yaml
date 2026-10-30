@@ -33,6 +33,7 @@ phases:
     runtime-versions:
       java: corretto17
     commands:
+      - bash scripts/build-metrics.sh start
       - gem install bundler
       - bundle install
       - |
@@ -86,6 +87,7 @@ phases:
       - bash scripts/supply-chain.sh upload android
       - rm -f android/app/keystore/release-key.jks
 
+      - bash scripts/build-metrics.sh finish android
 artifacts:
   files:
     - build/app/outputs/flutter-apk/app-*-release.apk

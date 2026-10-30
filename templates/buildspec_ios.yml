@@ -39,6 +39,7 @@ env:
 phases:
   install:
     commands:
+      - bash scripts/build-metrics.sh start
       - gem install bundler
       - bundle install
       - |
@@ -167,6 +168,7 @@ phases:
       # leaves the report that explains it.
       - bash scripts/supply-chain.sh upload ios
 
+      - bash scripts/build-metrics.sh finish ios
 artifacts:
   files:
     - build/ios/ipa/*.ipa

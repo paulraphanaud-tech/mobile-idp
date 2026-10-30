@@ -355,7 +355,7 @@ generate_files() {
 
   # Called by both buildspecs; a generated project without it fails the build
   # at the install phase.
-  for s in supply-chain.sh; do
+  for s in supply-chain.sh build-metrics.sh; do
     cp "$TEMPLATES_DIR/scripts/$s" "$PROJECT_DIR/scripts/$s"
     replace_placeholders "$PROJECT_DIR/scripts/$s"
     chmod +x "$PROJECT_DIR/scripts/$s"
@@ -430,6 +430,7 @@ print_summary() {
   echo -e "  scripts/setup.sh"
   echo -e "  scripts/confirm.sh"
   echo -e "  scripts/supply-chain.sh"
+  echo -e "  scripts/build-metrics.sh"
   echo -e ""
   echo -e "${YELLOW}Next steps:${NC}"
   echo -e ""

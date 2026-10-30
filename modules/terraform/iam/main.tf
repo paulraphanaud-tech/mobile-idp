@@ -90,6 +90,29 @@ data "aws_iam_policy_document" "codebuild_policy" {
     ]
   }
 
+  # CloudWatch custom metrics (scripts/build-metrics.sh).
+  #
+  # PutMetricData has no resource ARN — it is one of the actions AWS documents
+  # as requiring "*" — but it does support the cloudwatch:namespace condition
+  # key, so the grant is confined to this platform's own namespace rather than
+  # letting a build write metrics anywhere in the account.
+  dynamic "statement" {
+    for_each = var.metrics_namespace != "" ? [1] : []
+
+    content {
+      sid       = "CloudWatchMetricsAccess"
+      effect    = "Allow"
+      actions   = ["cloudwatch:PutMetricData"]
+      resources = ["*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "cloudwatch:namespace"
+        values   = [var.metrics_namespace]
+      }
+    }
+  }
+
   # CodeArtifact — emitted only when a domain and repositories are supplied.
   #
   # The previous version of this granted these actions on "*" unconditionally.
