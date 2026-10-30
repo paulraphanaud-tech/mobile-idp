@@ -1,0 +1,27 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+# Saved plans written by `make infra-plan` / `make infra-apply`. Plan files are
+# not encrypted and can contain resolved variable values — never commit them.
+*.tfplan
+.terraform-plan-*.tfplan
+
+# Fastlane
+fastlane/env.secret
+fastlane/report.xml
+fastlane/README.md
+
+# Signing material
+*.keystore
+*.jks
+*_b64.txt
+
+# Dart / Flutter (modules/flutter/*)
+# pubspec.lock is ignored because these are libraries, not applications — a
+# committed lock file in a library pins nothing for the consuming app and only
+# causes merge conflicts.
+.dart_tool/
+.packages
+pubspec.lock
+build/
