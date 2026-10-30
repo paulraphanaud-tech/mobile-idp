@@ -1,0 +1,16 @@
+name: idp_feature_flags_aws
+description: AWS-backed flag source for idp_feature_flags — a published flag document served from S3 via CloudFront, with client-side targeting.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  http: ^1.2.0
+  idp_feature_flags:
+    path: ../idp_feature_flags
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0
