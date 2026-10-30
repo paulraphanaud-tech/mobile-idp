@@ -14,6 +14,17 @@ env:
     # next one fails with errSecInternalComponent. An empty-password keychain
     # needs no unlocking, so signing keeps working for the whole archive.
     MATCH_KEYCHAIN_PASSWORD: ""
+    # --- Supply chain (SBOM + dependency CVE scan) -------------------------
+    # SC_FAIL_ON is the severity at or above which a finding fails the build:
+    # none (default) | low | moderate | high | critical | any. It starts at
+    # `none` on purpose — a template that fails other teams' builds on day one
+    # over an untriaged transitive advisory gets disabled outright. Raise it
+    # once your baseline is clean. Pin SYFT_VERSION / OSV_SCANNER_VERSION for
+    # reproducible tooling; empty means latest.
+    SC_ENABLED: "true"
+    SC_FAIL_ON: "none"
+    SYFT_VERSION: ""
+    OSV_SCANNER_VERSION: ""
   # No `secrets-manager:` block here on purpose. That section is a static
   # mapping with no variable expansion, so it cannot name an environment-
   # specific path like "staging/fastlane/credentials" — and one repo has one
@@ -37,11 +48,17 @@ phases:
           flutter precache
         fi
       - export PATH="$HOME/flutter/bin:$PATH"
+      - bash scripts/supply-chain.sh install
 
   pre_build:
     commands:
       - export PATH="$HOME/flutter/bin:$PATH"
       - flutter --version
+      # Before the signing setup below, so a dependency failure is reported
+      # without burning a Mac-fleet minute on keychain work.
+      - flutter pub get
+      - bash scripts/supply-chain.sh sbom ios
+      - bash scripts/supply-chain.sh scan ios
       - export AWS_REGION="${FL_AWS_REGION}"
       # The agent leaves LOGNAME=root while USER/HOME are cbuser. The build
       # itself runs as cbuser (verified via ownership of the archive output),
@@ -146,10 +163,14 @@ phases:
           grep -n -B8 "errSecInternalComponent" "$f" | tail -30
         done
       - ls -la build/ios/ipa/ 2>/dev/null || echo "No IPA found"
+      # Uploaded even when the build failed, so a scan-triggered failure still
+      # leaves the report that explains it.
+      - bash scripts/supply-chain.sh upload ios
 
 artifacts:
   files:
     - build/ios/ipa/*.ipa
+    - build/supply-chain/*
   discard-paths: yes
 
 cache:

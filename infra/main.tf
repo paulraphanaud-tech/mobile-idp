@@ -113,6 +113,9 @@ module "codebuild" {
     # `make upload-keystore` works in CI as well as the build's own download.
     S3_BUCKET_NAME     = module.s3.keystore_bucket_name
     S3_KEYSTORE_BUCKET = module.s3.keystore_bucket_name
+    # Where scripts/supply-chain.sh uploads SBOM and vulnerability reports,
+    # under supply-chain/<platform>/<build-id>/.
+    ARTIFACTS_BUCKET = module.s3.artifacts_bucket_name
   }
 
   # This block, not the buildspec, is where secrets are wired in. A buildspec's

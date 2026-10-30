@@ -6,6 +6,17 @@ env:
     ANDROID_HOME: "/usr/local/android-sdk-manual"
     ANDROID_SDK_ROOT: "/usr/local/android-sdk-manual"
     S3_BUCKET_NAME: "{{PROJECT_NAME}}-keystores"
+    # --- Supply chain (SBOM + dependency CVE scan) -------------------------
+    # SC_FAIL_ON is the severity at or above which a finding fails the build:
+    # none (default) | low | moderate | high | critical | any. It starts at
+    # `none` on purpose — a template that fails other teams' builds on day one
+    # over an untriaged transitive advisory gets disabled outright. Raise it
+    # once your baseline is clean. Pin SYFT_VERSION / OSV_SCANNER_VERSION for
+    # reproducible tooling; empty means latest.
+    SC_ENABLED: "true"
+    SC_FAIL_ON: "none"
+    SYFT_VERSION: ""
+    OSV_SCANNER_VERSION: ""
   # No `secrets-manager:` block here on purpose. That section is a static
   # mapping with no variable expansion, so it cannot name an environment-
   # specific path like "staging/fastlane/credentials" — and one repo has one
@@ -44,6 +55,7 @@ phases:
           flutter precache
         fi
       - export PATH="/opt/flutter/bin:$PATH"
+      - bash scripts/supply-chain.sh install
 
   pre_build:
     commands:
@@ -57,16 +69,27 @@ phases:
   build:
     commands:
       - export PATH="/opt/flutter/bin:$PATH"
+      # Resolve dependencies before the SBOM step so pubspec.lock and the
+      # Gradle caches exist for syft to read.
+      - flutter pub get
+      - bash scripts/supply-chain.sh sbom android
+      # Runs before the build: a dependency with a critical advisory should
+      # stop the build, not be discovered after an APK has been produced.
+      - bash scripts/supply-chain.sh scan android
       - bundle exec fastlane android build_deploy
 
   post_build:
     commands:
       - echo "Build completed on $(date)"
+      # Uploaded even when the build failed, so a scan-triggered failure still
+      # leaves the report that explains it.
+      - bash scripts/supply-chain.sh upload android
       - rm -f android/app/keystore/release-key.jks
 
 artifacts:
   files:
     - build/app/outputs/flutter-apk/app-*-release.apk
+    - build/supply-chain/*
   discard-paths: yes
 
 cache:

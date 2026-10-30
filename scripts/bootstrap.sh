@@ -353,6 +353,15 @@ generate_files() {
     echo -e "${YELLOW}[SKIP] scripts/setup.sh already exists${NC}"
   fi
 
+  # Called by both buildspecs; a generated project without it fails the build
+  # at the install phase.
+  for s in supply-chain.sh; do
+    cp "$TEMPLATES_DIR/scripts/$s" "$PROJECT_DIR/scripts/$s"
+    replace_placeholders "$PROJECT_DIR/scripts/$s"
+    chmod +x "$PROJECT_DIR/scripts/$s"
+    echo -e "${GREEN}[OK] scripts/$s${NC}"
+  done
+
   if [ -f "$IDP_ROOT/scripts/confirm.sh" ]; then
     cp "$IDP_ROOT/scripts/confirm.sh" "$PROJECT_DIR/scripts/confirm.sh"
     chmod +x "$PROJECT_DIR/scripts/confirm.sh"
@@ -420,6 +429,7 @@ print_summary() {
   echo -e "  infra/*.tf"
   echo -e "  scripts/setup.sh"
   echo -e "  scripts/confirm.sh"
+  echo -e "  scripts/supply-chain.sh"
   echo -e ""
   echo -e "${YELLOW}Next steps:${NC}"
   echo -e ""
