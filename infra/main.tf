@@ -77,11 +77,16 @@ module "iam" {
 
   project_name = local.name_prefix
 
+  # CodeBuild needs all three: match certs, the keystore, and the input
+  # artifact CodePipeline hands it.
   s3_bucket_arns = [
     module.s3.match_bucket_arn,
     module.s3.keystore_bucket_arn,
     module.s3.artifacts_bucket_arn,
   ]
+
+  # CodePipeline gets this one and nothing else.
+  artifacts_bucket_arn = module.s3.artifacts_bucket_arn
 
   secrets_arns            = module.secrets.secret_arns
   codestar_connection_arn = aws_codestarconnections_connection.github.arn
