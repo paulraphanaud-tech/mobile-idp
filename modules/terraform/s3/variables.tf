@@ -8,3 +8,17 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_match_bucket" {
+  description = <<-EOT
+    Create the Fastlane Match bucket. True when Match uses S3 storage; false
+    when it uses git, where the certificates live in a repository instead.
+
+    Turning this off on an existing project plans the bucket's destruction.
+    force_destroy = false makes that apply fail while the bucket still holds
+    certificates, so migrate them first (`fastlane match migrate`) and empty
+    the bucket deliberately.
+  EOT
+  type        = bool
+  default     = true
+}

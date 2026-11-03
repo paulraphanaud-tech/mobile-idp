@@ -90,6 +90,10 @@ replace_placeholders() {
       -e "s|{{FIREBASE_APP_IOS}}|$FIREBASE_APP_IOS|g" \
       -e "s|{{MODULES_PATH}}|$MODULES_PATH|g" \
       -e "s|{{FEATURE_FLAGS_BACKEND}}|$FEATURE_FLAGS_BACKEND|g" \
+      -e "s|{{MATCH_STORAGE_MODE}}|$MATCH_STORAGE_MODE|g" \
+      -e "s|{{MATCH_GIT_URL}}|$MATCH_GIT_URL|g" \
+      -e "s|{{MATCH_GIT_BRANCH}}|$MATCH_GIT_BRANCH|g" \
+      -e "s|{{MATCH_GIT_AUTH}}|$MATCH_GIT_AUTH|g" \
       "$file"
   else
     sed -i \
@@ -108,6 +112,10 @@ replace_placeholders() {
       -e "s|{{FIREBASE_APP_IOS}}|$FIREBASE_APP_IOS|g" \
       -e "s|{{MODULES_PATH}}|$MODULES_PATH|g" \
       -e "s|{{FEATURE_FLAGS_BACKEND}}|$FEATURE_FLAGS_BACKEND|g" \
+      -e "s|{{MATCH_STORAGE_MODE}}|$MATCH_STORAGE_MODE|g" \
+      -e "s|{{MATCH_GIT_URL}}|$MATCH_GIT_URL|g" \
+      -e "s|{{MATCH_GIT_BRANCH}}|$MATCH_GIT_BRANCH|g" \
+      -e "s|{{MATCH_GIT_AUTH}}|$MATCH_GIT_AUTH|g" \
       "$file"
   fi
 }
@@ -156,6 +164,30 @@ collect_info() {
 
   ask "Apple Team ID" APPLE_TEAM_ID ""
   ask "Apple Developer email" APPLE_USERNAME ""
+
+  echo ""
+  echo "iOS signing: where should Fastlane Match keep the encrypted certificates?"
+  echo "  1) s3  — a per-project S3 bucket created by Terraform (no extra credential)"
+  echo "  2) git — a private git repository (e.g. one shared certificates repo)"
+  echo ""
+  ask_choice "Choice" MATCH_CHOICE "1/2" "1"
+
+  # Defaults so every placeholder renders even under S3 storage.
+  MATCH_STORAGE_MODE="s3"
+  MATCH_GIT_URL=""
+  MATCH_GIT_BRANCH="main"
+  MATCH_GIT_AUTH="https"
+  if [ "$MATCH_CHOICE" = "2" ]; then
+    MATCH_STORAGE_MODE="git"
+    ask "Match git repository URL (https://... or git@host:org/repo.git)" MATCH_GIT_URL ""
+    ask "Match git branch" MATCH_GIT_BRANCH "main"
+    case "$MATCH_GIT_URL" in
+      git@*|ssh://*) MATCH_GIT_AUTH="ssh" ;;
+      *)             MATCH_GIT_AUTH="https" ;;
+    esac
+    echo -e "  CI will authenticate with ${BOLD}$([ "$MATCH_GIT_AUTH" = ssh ] && echo "an SSH deploy key" || echo "a token (HTTPS basic auth)")${NC},"
+    echo "  stored by 'make populate-secrets'. Use a read-only credential."
+  fi
 
   echo ""
   echo -e "${YELLOW}=== AWS Configuration ===${NC}"
@@ -624,6 +656,11 @@ print_summary() {
   echo -e "  lib/generated/{flags,events,design_tokens}.g.dart"
   echo -e ""
   echo -e "Feature flag backend: ${BOLD}$FEATURE_FLAGS_BACKEND${NC}"
+  if [ "$MATCH_STORAGE_MODE" = "git" ]; then
+    echo -e "Match storage:        ${BOLD}git${NC} — $MATCH_GIT_URL ($MATCH_GIT_BRANCH, CI auth: $MATCH_GIT_AUTH)"
+  else
+    echo -e "Match storage:        ${BOLD}s3${NC} — ${PROJECT_NAME}-match"
+  fi
   echo -e ""
   echo -e "${YELLOW}Next steps:${NC}"
   echo -e ""

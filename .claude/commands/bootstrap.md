@@ -21,7 +21,7 @@ This IDP repository lives at the current working directory and provides:
 - `ios_deploy_firebase` — Deploy iOS to Firebase App Distribution
 - `ios_deploy_testflight` — Deploy iOS to TestFlight
 - `keystore` — Android keystore management via S3
-- `match_s3` — iOS certificates & profiles via S3
+- `match` — iOS certificates & profiles via Fastlane Match, stored in S3 or a private git repo
 - `produce` — Create app on App Store Connect
 
 **Terraform modules** (`modules/terraform/`):
@@ -152,10 +152,12 @@ Note for later: this API key covers Match (certs/profiles) and TestFlight upload
 
 ### 3c. iOS Certificates (Match)
 
-Explain: "Fastlane Match will manage your iOS signing certificates and provisioning profiles, stored in an S3 bucket. This will be set up automatically during infrastructure provisioning."
+Explain: "Fastlane Match will manage your iOS signing certificates and provisioning profiles, encrypted, either in an S3 bucket created during infrastructure provisioning, or in a private git repository you provide."
 
 Ask:
-- **Match S3 bucket name** — Default: `{project-name}-match`
+- **Match storage** — `s3` (default) or `git`.
+  - `s3`: **Match S3 bucket name** — Default: `{project-name}-match`
+  - `git`: **repository URL** (private; HTTPS or SSH) and **branch** (default `main`). CI auth follows the URL — HTTPS uses a read-only token, SSH a read-only deploy key — and is stored by `make populate-secrets`, not collected here. See "Match storage: S3 or git" in `docs/secrets.md`.
 - "Have you already initialized Match for this app's bundle ID?" (usually No for a new project)
 - **Match password** — the passphrase Match uses to encrypt certs/profiles at rest in S3 (this is required — `match` will fail with "Bailing out instead of asking for a password, since this is non-interactive mode" if `MATCH_PASSWORD` is unset). Offer to generate a strong random one (e.g. `openssl rand -base64 24`) rather than asking the user to invent one; store it for `env.secret`.
 
@@ -315,7 +317,7 @@ iOS:
   Apple Team ID:     XXXXXXXXXX
   Apple Email:       dev@company.com
   ASC API Key:       [configured]
-  Match S3 Bucket:   my-app-match
+  Match storage:     s3 (my-app-match)   # or: git (git@github.com:org/certs.git, main)
 
 Android:
   Package Name:      com.company.myapp
@@ -367,7 +369,7 @@ After confirmation, generate all files in the TARGET project directory.
 
 ### 9c. Secrets file
 - **`env.secret`** — Write the actual collected secrets to `fastlane/env.secret` (this file is gitignored). Include all secrets the user provided during the wizard:
-  - `MATCH_PASSWORD` (if iOS — required for Match's S3 storage mode, see Step 3c)
+  - `MATCH_PASSWORD` (if iOS — required by Match in both S3 and git storage, see Step 3c). Never write a Match git token here unless the user asks: locally their own git credentials normally suffice.
   - `FIREBASE_CLI_TOKEN`
   - `APP_STORE_CONNECT_API_KEY_KEY_ID`, `APP_STORE_CONNECT_API_KEY_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_KEY`, `APP_STORE_CONNECT_API_KEY_IS_KEY_CONTENT_BASE64=false`
   - `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (if provided)

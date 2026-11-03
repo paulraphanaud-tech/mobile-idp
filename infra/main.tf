@@ -23,7 +23,7 @@ locals {
       description = "Fastlane app config for ${var.environment} (FLAVOR, SCHEME, Firebase App IDs). Identifiers, not credentials."
     }
     (local.secret_paths.fastlane_creds) = {
-      description = "Fastlane credentials for ${var.environment} (Firebase CLI token, App Store Connect API key, MATCH_PASSWORD)."
+      description = "Fastlane credentials for ${var.environment} (Firebase CLI token, App Store Connect API key, MATCH_PASSWORD, Match git credential when Match uses git storage)."
     }
     (local.secret_paths.android_signing) = {
       description = "Android keystore signing credentials for ${var.environment}."
@@ -34,6 +34,18 @@ locals {
   }
 
   secret_definitions = length(var.secret_definitions) > 0 ? var.secret_definitions : local.default_secret_definitions
+
+  # Fastlane Match storage. The git credential is referenced from Secrets
+  # Manager only in git mode: CodeBuild fails the whole build at startup when a
+  # referenced JSON key is missing, and S3 projects never wrote one.
+  match_uses_git = var.match_storage_mode == "git"
+
+  match_git_secret_key = var.match_git_auth == "ssh" ? "MATCH_GIT_PRIVATE_KEY" : "MATCH_GIT_BASIC_AUTHORIZATION"
+
+  match_git_secret_variables = {
+    for k in(local.match_uses_git ? [local.match_git_secret_key] : []) :
+    k => "${local.secret_paths.fastlane_creds}:${k}"
+  }
 }
 
 # =============================================================================
@@ -55,7 +67,9 @@ resource "aws_codestarconnections_connection" "github" {
 module "s3" {
   source       = "../modules/terraform/s3"
   project_name = local.name_prefix
-  tags         = var.tags
+  # No match bucket when certificates live in git.
+  create_match_bucket = !local.match_uses_git
+  tags                = var.tags
 }
 
 # =============================================================================
@@ -96,15 +110,16 @@ module "iam" {
 
   project_name = local.name_prefix
 
-  # CodeBuild needs all three: match certs, the keystore, and the input
-  # artifact CodePipeline hands it — plus the flag bucket when that backend is
-  # in use, so `make flags-publish` can write the document from a build.
+  # CodeBuild needs all three: match certs (S3 storage only), the keystore,
+  # and the input artifact CodePipeline hands it — plus the flag bucket when
+  # that backend is in use, so `make flags-publish` can write the document
+  # from a build. compact() drops the match ARN, null under git storage.
   s3_bucket_arns = concat(
-    [
+    compact([
       module.s3.match_bucket_arn,
       module.s3.keystore_bucket_arn,
       module.s3.artifacts_bucket_arn,
-    ],
+    ]),
     module.feature_flags[*].bucket_arn,
   )
 
@@ -134,9 +149,15 @@ module "codebuild" {
   codebuild_role_arn = module.iam.codebuild_role_arn
 
   environment_variables = {
-    FASTLANE_ENV    = var.environment
-    ENVIRONMENT     = var.environment
-    MATCH_S3_BUCKET = module.s3.match_bucket_name
+    FASTLANE_ENV = var.environment
+    ENVIRONMENT  = var.environment
+    # Match storage. MATCH_S3_BUCKET is empty under git storage; the git
+    # settings are empty under S3. modules/fastlane/match reads whichever
+    # MATCH_STORAGE_MODE selects.
+    MATCH_STORAGE_MODE = var.match_storage_mode
+    MATCH_S3_BUCKET    = module.s3.match_bucket_name != null ? module.s3.match_bucket_name : ""
+    MATCH_GIT_URL      = local.match_uses_git ? var.match_git_url : ""
+    MATCH_GIT_BRANCH   = local.match_uses_git ? var.match_git_branch : ""
     # Two names for one bucket: buildspec.yaml reads S3_BUCKET_NAME, while
     # modules/fastlane/keystore reads S3_KEYSTORE_BUCKET. Setting both means
     # `make upload-keystore` works in CI as well as the build's own download.
@@ -171,7 +192,7 @@ module "codebuild" {
   # Fastfile and modules/fastlane/*). They are not free-form: the App Store
   # Connect ones must be spelled APP_STORE_CONNECT_API_KEY_* for
   # app_store_connect_api_key to pick them up.
-  secrets_manager_variables = {
+  secrets_manager_variables = merge({
     FLAVOR                              = "${local.secret_paths.fastlane_config}:FLAVOR"
     SCHEME                              = "${local.secret_paths.fastlane_config}:SCHEME"
     FIREBASE_APP_ANDROID                = "${local.secret_paths.fastlane_config}:FIREBASE_APP_ANDROID"
@@ -186,7 +207,7 @@ module "codebuild" {
     KEYSTORE_PASSWORD                   = "${local.secret_paths.android_signing}:KEYSTORE_PASSWORD"
     KEY_ALIAS                           = "${local.secret_paths.android_signing}:KEY_ALIAS"
     KEY_PASSWORD                        = "${local.secret_paths.android_signing}:KEY_PASSWORD"
-  }
+  }, local.match_git_secret_variables)
 
   tags = var.tags
 }

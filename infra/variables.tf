@@ -200,3 +200,67 @@ variable "flags_price_class" {
   type        = string
   default     = "PriceClass_100"
 }
+
+# =============================================================================
+# iOS signing (Fastlane Match)
+# =============================================================================
+
+variable "match_storage_mode" {
+  description = <<-EOT
+    Where Fastlane Match keeps the encrypted iOS certificates and profiles.
+
+      "s3"   The per-project `<prefix>-match` bucket (the default). CI reads it
+             with the CodeBuild role, so no extra credential is stored.
+
+      "git"  A private git repository (match_git_url). No match bucket is
+             created. CI authenticates to the repository with the credential
+             in `<env>/fastlane/credentials` named by match_git_auth.
+
+    Switching an existing project from "s3" to "git" plans the match bucket's
+    destruction; that apply fails while the bucket still holds objects
+    (force_destroy = false). Run `fastlane match migrate` first — see
+    docs/secrets.md.
+  EOT
+  type        = string
+  default     = "s3"
+
+  validation {
+    condition     = contains(["s3", "git"], var.match_storage_mode)
+    error_message = "match_storage_mode must be \"s3\" or \"git\"."
+  }
+}
+
+variable "match_git_url" {
+  description = "Private repository holding the Match certificates. Required when match_storage_mode = \"git\": an https:// URL with match_git_auth = \"https\", an SSH URL (git@host:org/repo.git) with match_git_auth = \"ssh\"."
+  type        = string
+  default     = ""
+}
+
+variable "match_git_branch" {
+  description = "Branch of match_git_url to read. One repository can serve several apps or teams on separate branches."
+  type        = string
+  default     = "main"
+}
+
+variable "match_git_auth" {
+  description = <<-EOT
+    How CI authenticates to match_git_url. Only used when
+    match_storage_mode = "git".
+
+      "https"  MATCH_GIT_BASIC_AUTHORIZATION — base64("<user>:<token>") of a
+               token with read access to the repo (fine-grained PAT, or a
+               GitHub App / machine user token).
+      "ssh"    MATCH_GIT_PRIVATE_KEY — a read-only deploy key on the repo.
+
+    Either way the value lives under `<env>/fastlane/credentials` and is
+    written by `make populate-secrets`; CodeBuild references it only in git
+    mode, so S3 projects need not have the key.
+  EOT
+  type        = string
+  default     = "https"
+
+  validation {
+    condition     = contains(["https", "ssh"], var.match_git_auth)
+    error_message = "match_git_auth must be \"https\" or \"ssh\"."
+  }
+}

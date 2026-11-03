@@ -1,11 +1,11 @@
 output "match_bucket_name" {
-  description = "Name of the Fastlane Match S3 bucket"
-  value       = aws_s3_bucket.match.id
+  description = "Name of the Fastlane Match S3 bucket. null when create_match_bucket = false."
+  value       = try(aws_s3_bucket.match[0].id, null)
 }
 
 output "match_bucket_arn" {
-  description = "ARN of the Fastlane Match S3 bucket"
-  value       = aws_s3_bucket.match.arn
+  description = "ARN of the Fastlane Match S3 bucket. null when create_match_bucket = false."
+  value       = try(aws_s3_bucket.match[0].arn, null)
 }
 
 output "keystore_bucket_name" {

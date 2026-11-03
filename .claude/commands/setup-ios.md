@@ -10,11 +10,11 @@ This repository provides these iOS-related modules:
 - `ios_build` — Builds IPA with Xcode, manages version/build numbers
 - `ios_deploy_firebase` — Deploys IPA to Firebase App Distribution
 - `ios_deploy_testflight` — Uploads IPA to TestFlight / App Store Connect
-- `match_s3` — Syncs iOS certificates & provisioning profiles via S3 (Fastlane Match)
+- `match` — Syncs iOS certificates & provisioning profiles with Fastlane Match, from S3 or a private git repo (`MATCH_STORAGE_MODE`). `match_s3` is a deprecated alias kept for older projects.
 - `produce` — Creates a new app on App Store Connect
 
 **Terraform modules** (`modules/terraform/`):
-- `s3` — S3 bucket for Match certificate/profile storage
+- `s3` — S3 bucket for Match certificate/profile storage (only with S3 storage)
 - `codebuild` — CodeBuild project for iOS (macOS ARM, Sonoma)
 - `secrets` — Secrets Manager for Apple credentials
 - `firebase` — Firebase iOS app registration
@@ -56,8 +56,16 @@ Guide them step by step:
 
 Ask the user:
 
-1. **Match S3 bucket** — Bucket name for certificate/profile storage (default: `{project-name}-match`)
-2. **AWS Region** — For the Match S3 bucket (default: `eu-west-1`)
+1. **Match storage** — where the encrypted certificates live:
+   - `s3` (default) — a per-project bucket Terraform creates. CI reads it with its IAM role; no extra credential.
+   - `git` — a private git repository. The usual pick when one certificates repo is shared across several apps or teams, or the team already uses Match with git.
+2. **If `s3`:** Match S3 bucket (default: `{project-name}-match`) and AWS region (default: `eu-west-1`).
+   **If `git`:**
+   - **Repository URL** — `https://github.com/org/certs.git` or `git@github.com:org/certs.git`. It must be **private**.
+   - **Branch** (default: `main`) — one repo can serve several apps/teams on separate branches.
+   - **CI auth** — follows from the URL: HTTPS → a read-only token (fine-grained PAT, *Contents: read*) stored as `MATCH_GIT_BASIC_AUTHORIZATION`; SSH → a read-only deploy key without passphrase stored as `MATCH_GIT_PRIVATE_KEY`. Both are written by `make populate-secrets` — never ask the user to paste the token into the chat.
+   - Locally nothing extra is needed if the developer's own git credentials can clone the repo.
+   - Write `MATCH_STORAGE_MODE`, `MATCH_GIT_URL`, `MATCH_GIT_BRANCH` to `fastlane/env.<env>` and `match_storage_mode`, `match_git_url`, `match_git_branch`, `match_git_auth` to every `infra/environments/<env>/terraform.tfvars`. The two must agree.
 3. **Certificate types needed**:
    - `development` — For debug builds and devices
    - `distribution` — For App Store / TestFlight (app-store type)
@@ -68,8 +76,11 @@ Ask the user:
 ### If Match is not initialized:
 Guide them:
 1. First run requires write access: `bundle exec fastlane ios sync_certs cert_type:development readonly:false`
-2. This will generate and upload certificates to S3
+2. This will generate and upload certificates to S3 or push them to the git repo (with the developer's own git write access)
 3. Subsequent CI runs use `readonly:true`
+
+### Moving an existing project from S3 to git
+Follow "Migrating an existing project from S3 to git" in `docs/secrets.md`. It is a copy of the encrypted files, not a re-issue. The subsequent `make infra-plan` **destroys the match bucket**: state that explicitly when showing the plan, and let the user run the gated apply.
 
 ## Step 4 — Deployment Targets
 
@@ -123,7 +134,10 @@ Generate/update the following files:
   APPLE_USERNAME=user@example.com
   FIREBASE_APP_IOS=1:...:ios:...
   APP_STORE_TESTER_GROUP=Testers
-  MATCH_S3_BUCKET=my-app-match
+  MATCH_STORAGE_MODE=s3            # or git
+  MATCH_S3_BUCKET=my-app-match     # s3 only
+  MATCH_GIT_URL=                   # git only
+  MATCH_GIT_BRANCH=main            # git only
   AWS_REGION=eu-west-1
   ```
 
@@ -149,7 +163,7 @@ Generate/update the following files:
 Provide a verification checklist:
 - [ ] Apple Developer account access confirmed
 - [ ] App Store Connect API key created and stored
-- [ ] Match S3 bucket created
+- [ ] Match storage ready (S3 bucket created, or git repo created and its read-only CI credential populated)
 - [ ] Certificates synced: `bundle exec fastlane ios sync_certs`
 - [ ] App created on ASC (if needed): `make create-app`
       Irreversible — ASC records cannot be deleted and the app name is unique

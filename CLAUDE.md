@@ -30,7 +30,8 @@ what a bootstrapped consumer project ends up with.
 
 - **Firebase:** App Distribution for both platforms
 - **Code signing (iOS):** Fastlane Match backed by a per-project S3 bucket
-  (`<project>-match`)
+  (`<project>-match`, the default) or a private git repository
+  (`match_storage_mode = "git"`)
 
 ## What "environment" means here
 
@@ -248,7 +249,7 @@ fall into three tiers.
 | `make flutter-test` / `flutter-get` / `flutter-clean` | Local only. |
 | `make build-android` / `build-ios` | Local build. Produces artifacts, ships nothing. |
 | `make download-keystore` | Reads from S3. |
-| `make sync-certs` / `sync-certs-appstore` with `readonly:true` | Reads Match state from S3. CI always uses `readonly:true` (see `buildspec_ios.yml`). |
+| `make sync-certs` / `sync-certs-appstore` with `readonly:true` | Reads Match state from S3 or git. CI always uses `readonly:true` (see `buildspec_ios.yml`). |
 | `bash scripts/setup.sh check` | Prerequisite check. |
 | `make codegen` / `codegen-check` / `validate-registries` | Regenerates or checks `lib/generated/`. Local files only. |
 | `make design-tokens` | Regenerates the theme from `design/tokens.json`. |
@@ -404,7 +405,7 @@ the Secrets section above for why.
 
 | Module | Creates |
 |---|---|
-| `s3` | Three buckets — match certs, Android keystores, pipeline artifacts. All versioned, SSE-AES256, public access blocked, `force_destroy = false`. |
+| `s3` | Three buckets — match certs (only when `create_match_bucket`, i.e. S3 storage), Android keystores, pipeline artifacts. All versioned, SSE-AES256, public access blocked, `force_destroy = false`. `moved` blocks keep an existing match bucket at its old address. |
 | `secrets` | The four Secrets Manager entries, empty, 7-day recovery window. |
 | `iam` | CodeBuild and CodePipeline service roles. No IAM users, no access keys. |
 | `codebuild` | The Android and iOS projects plus the Mac fleet. |
@@ -422,7 +423,8 @@ Fastfile imports them and wraps them in lanes, so lane names stay the
 project's own. Functions: `prepare_and_check`, `compute_next_version`
 (`common`), `build_android` / `build_ios`, `deploy_android_to_app_distrib` /
 `deploy_ios_to_app_distrib`, `deploy_android_to_play_store`,
-`deploy_ios_to_app_store_connect`, `sync_certificates` (`match_s3`),
+`deploy_ios_to_app_store_connect`, `sync_certificates` (`match`; `match_s3`
+is a deprecated alias that loads it),
 `create_app_on_asc` (`produce`), the `keystore` trio, and `dart_defines`
 (`common`), which forwards `FLAGS_URL` / `FLAGS_BACKEND` / `ENVIRONMENT` into
 the build as `--dart-define`. Only non-secret identifiers belong there: a
@@ -440,7 +442,8 @@ which is why `create_app` is a developer-machine action, not a CI one.
 ### Environment configuration (in a bootstrapped project)
 
 - `fastlane/env.<env>` — non-secret config: `FLAVOR`, `SCHEME`, Firebase App
-  IDs, `APP_IDENTIFIER`, `MATCH_S3_BUCKET`, `S3_KEYSTORE_BUCKET`, `AWS_REGION`,
+  IDs, `APP_IDENTIFIER`, `MATCH_STORAGE_MODE`, `MATCH_S3_BUCKET` or
+  `MATCH_GIT_URL`/`MATCH_GIT_BRANCH`, `S3_KEYSTORE_BUCKET`, `AWS_REGION`,
   `FLAGS_BACKEND`, `FLAGS_URL`
 - `fastlane/env.secret` — local-only credentials, gitignored. In CI these come
   from Secrets Manager instead; the Fastfile's `before_all` skips the file
@@ -471,6 +474,22 @@ Distribution and incremented. `BUMP=patch|minor|major` chooses the segment;
 
 - **Android** — keystore in the `<prefix>-keystores` bucket, downloaded at
   build time; passwords from `<env>/android/signing`.
-- **iOS** — Fastlane Match with S3 storage in the `<prefix>-match` bucket,
-  encrypted with `MATCH_PASSWORD`. CI always runs Match `readonly:true` so a
-  build can never create or revoke a certificate.
+- **iOS** — Fastlane Match, encrypted with `MATCH_PASSWORD`. CI always runs
+  Match `readonly:true` so a build can never create or revoke a certificate.
+  Storage is chosen per environment by `match_storage_mode` (tfvars, CI) and
+  `MATCH_STORAGE_MODE` (`fastlane/env.<env>`, local) — keep them in agreement:
+  - **`s3`** (default) — the `<prefix>-match` bucket; CI reads it with the
+    CodeBuild role, no stored credential.
+  - **`git`** — private repo `match_git_url` / branch `match_git_branch`. No
+    match bucket and no S3 grant for one. CI authenticates with a read-only
+    credential from `<env>/fastlane/credentials`: `MATCH_GIT_BASIC_AUTHORIZATION`
+    (`match_git_auth = "https"`) or `MATCH_GIT_PRIVATE_KEY` (`"ssh"`, a deploy
+    key; the host key is recorded on first use in CI). CodeBuild references
+    that key **only in git mode** — a referenced JSON key that is missing
+    fails the build at startup — so run `make populate-secrets` before the
+    apply that switches a project to git. Cross-variable mistakes (git with no
+    URL, an SSH URL with `https` auth) fail the plan via preconditions on the
+    `match_storage` output.
+  - Switching an existing project S3 → git plans the **destruction of the
+    match bucket**; call it out when showing that plan. The procedure (a copy
+    of the encrypted files, not a re-issue) is in `docs/secrets.md`.
