@@ -22,6 +22,9 @@ jobs:
     name: Analyze & test
     runs-on: ubuntu-latest
     timeout-minutes: @@TIMEOUT@@
+    defaults:
+      run:
+        working-directory: @@APP_DIR@@
     steps:
       - uses: actions/checkout@@@CHECKOUT_VERSION@@
         with:
@@ -37,9 +40,13 @@ jobs:
       # Same guard as the IDP buildspecs: fail when a registry was edited
       # without regenerating lib/generated/.
       - name: Registry codegen check
-        if: hashFiles('scripts/codegen.sh') != ''
+        if: hashFiles('@@APP_PREFIX@@scripts/codegen.sh') != ''
         run: bash scripts/codegen.sh validate && bash scripts/codegen.sh check
 
       - run: flutter analyze
 
-      - run: flutter test --reporter github
+      # An app freshly written in a chat often has no test/ yet; `flutter test`
+      # fails outright without one.
+      - name: Test
+        if: hashFiles('@@APP_PREFIX@@test/**/*_test.dart') != ''
+        run: flutter test --reporter github

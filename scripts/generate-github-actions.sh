@@ -13,7 +13,14 @@ set -euo pipefail
 # Options:
 #   --type ios-native|flutter   default: detected (pubspec.yaml → flutter, *.xcodeproj → ios-native)
 #   --workflows LIST            comma-separated. ios-native: ci,preview,testflight
-#                               flutter: ci.  Default: ci,preview (ios-native) / ci (flutter)
+#                               flutter: ci,preview (Android APK),ios-preview (simulator).
+#                               Default: ci,preview (ios-native); flutter: ci plus
+#                               ios-preview if ios/ exists, preview if android/ exists
+#                               or neither does
+#   --app-dir DIR               flutter: app directory relative to the repo root;
+#                               default: . if ./pubspec.yaml, else the only app pubspec
+#   --org ORG                   flutter: reverse-domain org for `flutter create` when
+#                               a platform folder is missing; default: com.example
 #   --scheme NAME               default: SCHEME from .idp.env
 #   --xcodeproj PATH            default: XCODE_PROJECT from .idp.env
 #   --workspace PATH            default: XCODE_WORKSPACE from .idp.env
@@ -41,7 +48,7 @@ UPLOAD_ARTIFACT_VERSION="v6"
 AWS_CREDENTIALS_VERSION="v6"
 
 TYPE="" WORKFLOWS="" RUNNER="macos-latest" XCODE_VERSION="latest-stable" TIMEOUT="30" DEPLOY_TIMEOUT="45"
-DEFAULT_BRANCH="main" BUILD_ONLY=0 OUT=".github/workflows" FORCE=0 DRY_RUN=0
+DEFAULT_BRANCH="main" APP_DIR="" ORG="com.example" BUILD_ONLY=0 OUT=".github/workflows" FORCE=0 DRY_RUN=0
 ARG_SCHEME="" ARG_PROJECT="" ARG_WORKSPACE=""
 
 while [ $# -gt 0 ]; do
@@ -55,11 +62,13 @@ while [ $# -gt 0 ]; do
     --xcode)          XCODE_VERSION="$2"; shift 2 ;;
     --timeout)        TIMEOUT="$2"; shift 2 ;;
     --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
+    --app-dir)        APP_DIR="$2"; shift 2 ;;
+    --org)            ORG="$2"; shift 2 ;;
     --build-only)     BUILD_ONLY=1; shift ;;
     --out)            OUT="$2"; shift 2 ;;
     --force)          FORCE=1; shift ;;
     --dry-run)        DRY_RUN=1; shift ;;
-    -h|--help)        sed -n '3,30p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '3,36p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -80,8 +89,11 @@ XCODE_WORKSPACE="${ARG_WORKSPACE:-$XCODE_WORKSPACE}"
 
 if [ -z "$TYPE" ]; then
   if [ -n "$IDP_PROJECT_TYPE" ]; then TYPE="$IDP_PROJECT_TYPE"
-  elif [ -f pubspec.yaml ]; then TYPE="flutter"
+  elif [ -f pubspec.yaml ] || [ -n "$APP_DIR" ]; then TYPE="flutter"
   elif ls ./*.xcodeproj >/dev/null 2>&1; then TYPE="ios-native"
+  elif [ -n "$(find . -maxdepth 3 -name pubspec.yaml -not -path './packages/*' -not -path '*/example/*' \
+         -exec grep -lqE '^[[:space:]]+sdk:[[:space:]]*flutter' {} \; -print 2>/dev/null)" ]; then
+    TYPE="flutter"   # Flutter app in a subdirectory (monorepo); --app-dir is detected below
   else fail "cannot detect project type; pass --type"; fi
 fi
 
@@ -97,7 +109,25 @@ case "$TYPE" in
     else CONTAINER_FLAG="-project \"$XCODE_PROJECT\""; fi
     ;;
   flutter)
-    WORKFLOWS="${WORKFLOWS:-ci}"
+    if [ -z "$APP_DIR" ]; then
+      if [ -f pubspec.yaml ]; then APP_DIR="."
+      else
+        # An app pubspec depends on the Flutter SDK and is not a package under
+        # packages/ or a plugin's example/.
+        mapfile -t cands < <(grep -lE '^[[:space:]]+sdk:[[:space:]]*flutter' \
+          $(find . -maxdepth 3 -name pubspec.yaml -not -path './packages/*' \
+              -not -path '*/example/*' -not -path './.dart_tool/*' | sort) 2>/dev/null || true)
+        [ "${#cands[@]}" -eq 1 ] || fail "found ${#cands[@]} Flutter app pubspecs; pass --app-dir"
+        APP_DIR="$(dirname "${cands[0]}" | sed 's|^\./||')"
+      fi
+    fi
+    APP_DIR="${APP_DIR%/}"; APP_DIR="${APP_DIR#./}"; [ -n "$APP_DIR" ] || APP_DIR="."
+    [ -f "$APP_DIR/pubspec.yaml" ] || fail "no pubspec.yaml in $APP_DIR"
+    if [ -z "$WORKFLOWS" ]; then
+      WORKFLOWS="ci"
+      [ -d "$APP_DIR/ios" ] && WORKFLOWS="$WORKFLOWS,ios-preview"
+      if [ -d "$APP_DIR/android" ] || [ ! -d "$APP_DIR/ios" ]; then WORKFLOWS="$WORKFLOWS,preview"; fi
+    fi
     CONTAINER_FLAG=""
     ;;
   *) fail "unknown --type $TYPE" ;;
@@ -105,6 +135,9 @@ esac
 
 if [ "$BUILD_ONLY" -eq 1 ]; then XCODEBUILD_ACTION="build"; ACTION_TITLE="Build"
 else XCODEBUILD_ACTION="test"; ACTION_TITLE="Build & test"; fi
+
+[ -n "$APP_DIR" ] || APP_DIR="."
+if [ "$APP_DIR" = "." ]; then APP_PREFIX=""; else APP_PREFIX="$APP_DIR/"; fi
 
 # Escape a value for the right-hand side of a sed s||| expression.
 esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
@@ -130,6 +163,9 @@ render() {
     -e "s|@@IDP_REF@@|$(esc "$IDP_REF")|g" \
     -e "s|@@AWS_REGION@@|$(esc "$AWS_REGION")|g" \
     -e "s|@@GITHUB_REPO@@|$(esc "$GITHUB_REPO")|g" \
+    -e "s|@@APP_DIR@@|$(esc "$APP_DIR")|g" \
+    -e "s|@@APP_PREFIX@@|$(esc "$APP_PREFIX")|g" \
+    -e "s|@@ORG@@|$(esc "$ORG")|g" \
     "$src")"
   if printf '%s' "$content" | grep -q '@@[A-Z_]*@@'; then
     fail "unrendered placeholder in $dest: $(printf '%s' "$content" | grep -o '@@[A-Z_]*@@' | sort -u | tr '\n' ' ')"
@@ -153,9 +189,11 @@ for wf in "${wanted[@]}"; do
     ios-native:preview)    render "$TPL/workflows/ios-native-preview.yml"    "$OUT/ios-preview.yml" ;;
     ios-native:testflight) render "$TPL/workflows/ios-native-testflight.yml" "$OUT/ios-testflight.yml" ;;
     flutter:ci)            render "$TPL/workflows/flutter-ci.yml"            "$OUT/flutter-ci.yml" ;;
+    flutter:preview)       render "$TPL/workflows/flutter-preview.yml"       "$OUT/flutter-preview.yml" ;;
+    flutter:ios-preview)   render "$TPL/workflows/flutter-ios-preview.yml"   "$OUT/flutter-ios-preview.yml" ;;
     *) fail "workflow '$wf' is not available for type $TYPE" ;;
   esac
 done
 render "$TPL/dependabot.yml" ".github/dependabot.yml"
 
-log "type=$TYPE workflows=$WORKFLOWS scheme=${SCHEME:-n/a} runner=$RUNNER xcode=$XCODE_VERSION"
+log "type=$TYPE workflows=$WORKFLOWS app_dir=$APP_DIR scheme=${SCHEME:-n/a} runner=$RUNNER xcode=$XCODE_VERSION"

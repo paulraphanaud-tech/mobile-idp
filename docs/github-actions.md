@@ -13,6 +13,8 @@ to "compiled, tested and runnable" without anyone's own computer.
 | `ios-preview.yml` | push to default branch; manual | macOS | optional `APPETIZE_API_TOKEN` secret, `APPETIZE_PUBLIC_KEY` variable | 1 |
 | `ios-testflight.yml` | manual only (`environment`, `bump` inputs) | macOS | GitHub OIDC infra (below), GitHub environment with `AWS_ROLE_ARN`, populated `<env>/fastlane/credentials`, app record | 2 |
 | `flutter-ci.yml` | push, any branch; manual | Linux | nothing | 1 |
+| `flutter-preview.yml` | push to default branch; manual | Linux | optional `APPETIZE_API_TOKEN` secret, `APPETIZE_PUBLIC_KEY_ANDROID` variable | 1 |
+| `flutter-ios-preview.yml` | push to default branch; manual | macOS | optional `APPETIZE_API_TOKEN` secret, `APPETIZE_PUBLIC_KEY_IOS` variable | 1 |
 | `.github/dependabot.yml` | monthly | — | keeps action versions current | — |
 
 Design choices worth keeping:
@@ -36,6 +38,30 @@ the app running in a browser — usable from a phone. The first upload creates
 an app and prints its `publicKey`; save it as the repo variable
 `APPETIZE_PUBLIC_KEY` so later runs update the same URL. Without a token the
 zip is still attached as an artifact.
+
+### Flutter previews
+
+Same idea for Flutter, one workflow per platform:
+
+- `flutter-preview.yml` — `flutter build apk --debug` on Linux (1x minutes).
+  The APK is attached to the run, so it can also be installed straight onto an
+  Android phone from the Actions page.
+- `flutter-ios-preview.yml` — `flutter build ios --simulator --debug` on macOS,
+  zipped `Runner.app` → Appetize `platform=ios`.
+
+Each platform is its own Appetize app, hence two variables. An app written in
+a Claude chat often has only `lib/` and `pubspec.yaml`: when
+`android/app/build.gradle[.kts]` or `ios/Runner.xcodeproj` is missing, the job
+runs `flutter create --platforms=<p> --org <org> .` for that build only and
+commits nothing back. Commit the generated folder once you need to customise
+it (permissions, icons, bundle ID).
+
+Defaults: the generator picks `ios-preview` when the app has an `ios/` folder,
+`preview` when it has `android/` or neither. Monorepos are supported: the app
+directory is detected (the only Flutter-app `pubspec.yaml` outside
+`packages/` and `example/`) or passed with `--app-dir`, and every job runs from
+it. `flutter-ci.yml` skips `flutter test` when there is no `test/*_test.dart`
+rather than failing.
 
 ## TestFlight without static credentials
 
