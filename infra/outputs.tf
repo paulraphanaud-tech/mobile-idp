@@ -2,8 +2,37 @@
 # S3
 # =============================================================================
 output "match_bucket_name" {
-  description = "S3 bucket for Fastlane Match certificates"
+  description = "S3 bucket for Fastlane Match certificates. null when match_storage_mode = \"git\"."
   value       = module.s3.match_bucket_name
+}
+
+# Where Match reads certificates from in CI. Also the place the cross-variable
+# checks live: a variable validation cannot reference another variable before
+# Terraform 1.9, and failing the plan here beats a Mac-fleet build failing on
+# "MATCH_STORAGE_MODE=git needs MATCH_GIT_URL" twenty minutes in.
+output "match_storage" {
+  description = "Fastlane Match storage: mode, and the bucket or repository CI reads."
+  value = {
+    mode       = var.match_storage_mode
+    s3_bucket  = module.s3.match_bucket_name
+    git_url    = local.match_uses_git ? var.match_git_url : null
+    git_branch = local.match_uses_git ? var.match_git_branch : null
+    git_auth   = local.match_uses_git ? var.match_git_auth : null
+  }
+
+  precondition {
+    condition     = !local.match_uses_git || trimspace(var.match_git_url) != ""
+    error_message = "match_storage_mode = \"git\" requires match_git_url."
+  }
+
+  precondition {
+    condition = !local.match_uses_git || (
+      var.match_git_auth == "ssh"
+      ? can(regex("^(git@|ssh://)", var.match_git_url))
+      : can(regex("^https://", var.match_git_url))
+    )
+    error_message = "match_git_url does not fit match_git_auth: \"https\" needs an https:// URL, \"ssh\" needs git@host:org/repo.git or ssh://..."
+  }
 }
 
 output "keystore_bucket_name" {

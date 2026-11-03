@@ -49,7 +49,7 @@ import "../{{MODULES_PATH}}/fastlane/android_deploy_play_store/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/ios_build/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/ios_deploy_firebase/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/ios_deploy_testflight/Fastfile"
-import "../{{MODULES_PATH}}/fastlane/match_s3/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/match/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/produce/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/keystore/Fastfile"
 

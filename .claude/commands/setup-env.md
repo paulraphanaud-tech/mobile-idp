@@ -42,7 +42,7 @@ For EACH environment the user listed, ask:
 ### AWS:
 10. **AWS Region** — (default: `eu-west-1`)
 11. **AWS Profile** — Local CLI profile (default: `default`)
-12. **Match S3 Bucket** — For iOS certificate storage
+12. **Match storage** — `s3` with a bucket, or `git` with a private repo URL and branch (iOS certificate storage)
 13. **Keystore S3 Bucket** — For Android keystore storage
 
 ### Android:
@@ -97,7 +97,10 @@ APPLE_USERNAME={username}
 # AWS
 AWS_PROFILE={profile}
 AWS_REGION={region}
-MATCH_S3_BUCKET={match_bucket}
+MATCH_STORAGE_MODE={match_storage_mode}   # s3 | git
+MATCH_S3_BUCKET={match_bucket}            # s3 only
+MATCH_GIT_URL={match_git_url}             # git only
+MATCH_GIT_BRANCH={match_git_branch}       # git only
 S3_KEYSTORE_BUCKET={keystore_bucket}
 ```
 

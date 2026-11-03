@@ -1,12 +1,26 @@
-# S3 auth: use access keys (not SSO) to avoid "Token is invalid and failed to refresh".
-# Set before running: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_REGION.
+# Read by `fastlane match ...` run directly (init, nuke, migrate, change_password).
+# The lanes pass the same values explicitly through sync_certificates
+# (modules/fastlane/match), so this file only matters for direct invocations.
+#
+# Storage is chosen by MATCH_STORAGE_MODE in fastlane/env.<env>: "s3" or "git".
 
 ENV["AWS_REGION"] = "{{AWS_REGION}}" if ENV["AWS_REGION"].to_s.empty?
 
-s3_bucket(ENV["MATCH_S3_BUCKET"] || "{{PROJECT_NAME}}-match")
-s3_region(ENV["AWS_REGION"] || "{{AWS_REGION}}")
+storage = ENV["MATCH_STORAGE_MODE"].to_s.empty? ? "{{MATCH_STORAGE_MODE}}" : ENV["MATCH_STORAGE_MODE"]
+storage_mode(storage)
 
-storage_mode("s3")
+if storage == "git"
+  # Private repository holding the encrypted certificates. Locally your own
+  # git credentials are used; CI uses MATCH_GIT_BASIC_AUTHORIZATION or
+  # MATCH_GIT_PRIVATE_KEY from Secrets Manager (see docs/secrets.md).
+  git_url(ENV["MATCH_GIT_URL"] || "{{MATCH_GIT_URL}}")
+  git_branch(ENV["MATCH_GIT_BRANCH"].to_s.empty? ? "{{MATCH_GIT_BRANCH}}" : ENV["MATCH_GIT_BRANCH"])
+else
+  # S3 auth: use access keys (not SSO) to avoid "Token is invalid and failed to refresh".
+  # Set before running: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_REGION.
+  s3_bucket(ENV["MATCH_S3_BUCKET"] || "{{PROJECT_NAME}}-match")
+  s3_region(ENV["AWS_REGION"] || "{{AWS_REGION}}")
+end
 
 type("development") # The default type, can be: appstore, adhoc, enterprise or development
 

@@ -41,7 +41,7 @@ end
 default_platform(:ios)
 
 import "../{{MODULES_PATH}}/fastlane/common/Fastfile"
-import "../{{MODULES_PATH}}/fastlane/match_s3/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/match/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/produce/Fastfile"
 import "../{{MODULES_PATH}}/fastlane/ios_native/Fastfile"
 

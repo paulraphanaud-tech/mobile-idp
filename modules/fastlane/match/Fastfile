@@ -1,0 +1,185 @@
+# =============================================================================
+# Module: Match
+# Provides: sync_certificates(cert_type, readonly)
+#
+# Fastlane Match with a choice of storage backend, selected by
+# MATCH_STORAGE_MODE:
+#
+#   s3   (default) Encrypted certs/profiles in the per-project S3 bucket
+#        (MATCH_S3_BUCKET). CI reads it with the CodeBuild role's temporary
+#        credentials — nothing extra to store.
+#
+#   git  Encrypted certs/profiles in a private git repository
+#        (MATCH_GIT_URL, MATCH_GIT_BRANCH). The usual choice when one
+#        certificates repo is shared across several apps or teams, or when the
+#        team already runs Match this way. CI needs a credential for the repo,
+#        in exactly one of:
+#          MATCH_GIT_BASIC_AUTHORIZATION   base64("<user>:<token>"), HTTPS URL
+#          MATCH_GIT_BEARER_AUTHORIZATION  a bearer token, HTTPS URL
+#          MATCH_GIT_PRIVATE_KEY           SSH deploy key (path or content), SSH URL
+#        Locally none is needed if your own git credentials can clone the repo.
+#
+# Either way the files are encrypted with MATCH_PASSWORD before they leave the
+# machine; the storage only ever sees ciphertext.
+# =============================================================================
+
+MATCH_STORAGE_MODES = %w[s3 git].freeze
+
+# Credential env vars Match reads on its own. An *empty* value is not the same
+# as unset to Match: an empty MATCH_GIT_BASIC_AUTHORIZATION still adds an
+# "Authorization: Basic " header to the clone and fails it. CodeBuild resolves
+# an empty JSON key to an empty string, so blank values are dropped here.
+MATCH_GIT_CREDENTIAL_VARS = %w[
+  MATCH_GIT_BASIC_AUTHORIZATION
+  MATCH_GIT_BEARER_AUTHORIZATION
+  MATCH_GIT_PRIVATE_KEY
+].freeze
+
+def match_storage_mode
+  mode = ENV['MATCH_STORAGE_MODE'].to_s.strip.downcase
+  mode = 's3' if mode.empty?
+  unless MATCH_STORAGE_MODES.include?(mode)
+    UI.user_error!("MATCH_STORAGE_MODE must be one of #{MATCH_STORAGE_MODES.join(', ')} (got '#{mode}')")
+  end
+  mode
+end
+
+def sync_certificates(cert_type, readonly)
+  mode = match_storage_mode
+
+  options = {
+    type: cert_type || "development",
+    app_identifier: [ENV['APP_IDENTIFIER']],
+    team_id: ENV['APPLE_TEAM_ID'],
+    storage_mode: mode,
+    readonly: readonly != false
+  }
+
+  case mode
+  when 's3'  then options.merge!(match_s3_options)
+  when 'git' then options.merge!(match_git_options(options[:readonly]))
+  end
+
+  match(options)
+
+  UI.message("Certificates synced (type: #{options[:type]}, storage: #{mode})!")
+end
+
+# -----------------------------------------------------------------------------
+# S3
+# -----------------------------------------------------------------------------
+def match_s3_options
+  s3_bucket = ENV['MATCH_S3_BUCKET']
+  UI.user_error!("MATCH_STORAGE_MODE=s3 needs MATCH_S3_BUCKET") if s3_bucket.to_s.empty?
+
+  # aws-sdk-ruby ignores AWS_CA_BUNDLE (it is a client option, not an env
+  # var, unlike the AWS CLI). Applying it globally lets CI point Ruby at a
+  # working CA bundle — the CodeBuild macOS image's default OpenSSL trust
+  # configuration fails S3 TLS with "certificate verify failed (unable to
+  # get certificate CRL)" even though the AWS CLI connects fine.
+  if ENV['AWS_CA_BUNDLE'] && !ENV['AWS_CA_BUNDLE'].empty?
+    require 'aws-sdk-s3'
+    Aws.config[:ssl_ca_bundle] = ENV['AWS_CA_BUNDLE']
+    UI.message("Using AWS_CA_BUNDLE for aws-sdk TLS: #{ENV['AWS_CA_BUNDLE']}")
+  end
+
+  {
+    s3_bucket: s3_bucket,
+    s3_region: ENV['AWS_REGION'] || 'eu-central-1'
+  }
+end
+
+# -----------------------------------------------------------------------------
+# Git
+# -----------------------------------------------------------------------------
+def match_git_options(readonly)
+  git_url = ENV['MATCH_GIT_URL'].to_s.strip
+  UI.user_error!("MATCH_STORAGE_MODE=git needs MATCH_GIT_URL (the private certificates repository)") if git_url.empty?
+
+  MATCH_GIT_CREDENTIAL_VARS.each { |k| ENV.delete(k) if ENV[k].to_s.strip.empty? }
+
+  present = MATCH_GIT_CREDENTIAL_VARS.select { |k| ENV.key?(k) }
+  if present.size > 1
+    UI.user_error!("Set only one of #{present.join(', ')} — Match would send them all and the result depends on the server.")
+  end
+
+  ssh_url = git_url.start_with?('git@') || git_url.start_with?('ssh://')
+
+  if ENV.key?('MATCH_GIT_PRIVATE_KEY')
+    UI.user_error!("MATCH_GIT_PRIVATE_KEY is an SSH key, but MATCH_GIT_URL is not an SSH URL (#{git_url})") unless ssh_url
+    ENV['MATCH_GIT_PRIVATE_KEY'] = match_git_private_key_file(ENV['MATCH_GIT_PRIVATE_KEY'])
+  elsif (ENV.key?('MATCH_GIT_BASIC_AUTHORIZATION') || ENV.key?('MATCH_GIT_BEARER_AUTHORIZATION')) && ssh_url
+    UI.user_error!("An HTTP authorization header cannot authenticate an SSH URL (#{git_url}). Use an https:// URL, or MATCH_GIT_PRIVATE_KEY.")
+  elsif present.empty? && match_ci?
+    UI.important("No Match git credential set — relying on whatever git credentials this machine already has.")
+  end
+
+  match_trust_git_host(git_url) if ssh_url && match_ci?
+
+  {
+    git_url: git_url,
+    git_branch: ENV['MATCH_GIT_BRANCH'].to_s.empty? ? 'main' : ENV['MATCH_GIT_BRANCH'],
+    # A readonly sync needs the branch tip only; a full clone of a long-lived
+    # certificates repo is wasted time on a Mac fleet billed by the minute.
+    # Not for a writing run: the first sync on a new branch must be able to
+    # create it, which cloning the branch directly cannot.
+    shallow_clone: readonly,
+    clone_branch_directly: readonly
+  }
+end
+
+def match_ci?
+  !!(ENV['CI'] || ENV['CODEBUILD_BUILD_ID'])
+end
+
+# Match accepts the key itself, but then feeds it to ssh-add through a bash
+# here-string inside a single-quoted `bash -c` — which breaks on keys stored
+# with literal "\n" (how a key pasted on one line into Secrets Manager comes
+# back). Writing it to a 0600 file and passing the path avoids both problems.
+def match_git_private_key_file(value)
+  path = File.expand_path(value)
+  return path if File.file?(path)
+
+  require 'tmpdir'
+  key = value.gsub('\n', "\n")
+  key << "\n" unless key.end_with?("\n")
+  file = File.join(Dir.tmpdir, "match_git_key_#{Process.pid}")
+  File.open(file, File::WRONLY | File::CREAT | File::TRUNC, 0o600) { |f| f.write(key) }
+  at_exit { File.delete(file) if File.exist?(file) }
+  file
+end
+
+# A fresh CI host has no known_hosts, so the first SSH clone fails with "Host
+# key verification failed". Record the host's key (trust on first use) unless
+# it is already known. Only in CI — a developer's known_hosts is theirs.
+def match_trust_git_host(git_url)
+  host, port = match_git_host(git_url)
+  return if host.nil?
+
+  ssh_dir = File.expand_path('~/.ssh')
+  known_hosts = File.join(ssh_dir, 'known_hosts')
+  lookup = port ? "[#{host}]:#{port}" : host
+  return if system('ssh-keygen', '-F', lookup, '-f', known_hosts, out: File::NULL, err: File::NULL)
+
+  require 'fileutils'
+  FileUtils.mkdir_p(ssh_dir, mode: 0o700)
+  args = ['ssh-keyscan', '-t', 'ed25519,ecdsa,rsa']
+  args += ['-p', port] if port
+  keys = IO.popen(args + [host], err: File::NULL, &:read)
+  if keys.to_s.strip.empty?
+    UI.important("ssh-keyscan returned nothing for #{host} — the Match clone may fail host key verification.")
+    return
+  end
+  File.open(known_hosts, 'a', 0o600) { |f| f.write(keys) }
+  UI.message("Added #{host} to #{known_hosts}")
+end
+
+# git@github.com:org/certs.git        -> ["github.com", nil]
+# ssh://git@host:2222/org/certs.git   -> ["host", "2222"]
+def match_git_host(git_url)
+  if (m = git_url.match(%r{\Assh://(?:[^@/]+@)?([^:/]+)(?::(\d+))?/}))
+    [m[1], m[2]]
+  elsif (m = git_url.match(/\A[^@]+@([^:]+):/))
+    [m[1], nil]
+  end
+end

@@ -91,18 +91,26 @@ data "aws_iam_policy_document" "permissions" {
     resources = var.secret_arns
   }
 
-  statement {
-    sid       = "ListMatchBucket"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = [var.match_bucket_arn]
+  # Only with S3 match storage. In git mode there is no bucket; CI reads the
+  # repository with the credential in the fastlane credentials secret above.
+  dynamic "statement" {
+    for_each = var.match_bucket_arn == null ? [] : [var.match_bucket_arn]
+    content {
+      sid       = "ListMatchBucket"
+      effect    = "Allow"
+      actions   = ["s3:ListBucket"]
+      resources = [statement.value]
+    }
   }
 
-  statement {
-    sid       = "ReadMatchObjects"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["${var.match_bucket_arn}/*"]
+  dynamic "statement" {
+    for_each = var.match_bucket_arn == null ? [] : [var.match_bucket_arn]
+    content {
+      sid       = "ReadMatchObjects"
+      effect    = "Allow"
+      actions   = ["s3:GetObject"]
+      resources = ["${statement.value}/*"]
+    }
   }
 }
 

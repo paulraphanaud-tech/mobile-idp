@@ -5,11 +5,11 @@
 #           build_ios_native(version, bump, latest_build_number, latest_version),
 #           deploy_ios_native_to_testflight(version, bump)
 # Requires: common module (compute_next_version)
-#           match_s3 module (sync_certificates) for signed builds
+#           match module (sync_certificates) for signed builds
 #
 # The Flutter ios_build module assumes ios/Runner.xcworkspace and runs
 # `flutter build`. A native project has neither, so it gets its own module;
-# signing (match_s3) and versioning (common) are shared.
+# signing (match) and versioning (common) are shared.
 #
 # ENV (all optional except APP_IDENTIFIER / APPLE_TEAM_ID for signed builds):
 #   XCODE_WORKSPACE   path to .xcworkspace (wins over XCODE_PROJECT when set)

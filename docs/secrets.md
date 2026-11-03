@@ -66,8 +66,8 @@ but do not let its presence here imply it needs rotating.
 
 | | |
 |---|---|
-| **Contains** | `FIREBASE_CLI_TOKEN`, `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_CONTENT`, `MATCH_PASSWORD` |
-| **Blast radius if leaked** | **The worst of the four.** The ASC key is an App Manager credential: an attacker can upload builds to TestFlight, change app metadata, and manage certificates under your team. The Firebase token can distribute arbitrary builds to your testers. `MATCH_PASSWORD` decrypts every certificate and provisioning profile in the match bucket — combined with S3 read access, that is your signing identity. |
+| **Contains** | `FIREBASE_CLI_TOKEN`, `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_CONTENT`, `MATCH_PASSWORD`; with Match git storage also **one of** `MATCH_GIT_BASIC_AUTHORIZATION` (`match_git_auth = "https"`) or `MATCH_GIT_PRIVATE_KEY` (`"ssh"`) |
+| **Blast radius if leaked** | **The worst of the four.** The ASC key is an App Manager credential: an attacker can upload builds to TestFlight, change app metadata, and manage certificates under your team. The Firebase token can distribute arbitrary builds to your testers. `MATCH_PASSWORD` decrypts every certificate and provisioning profile in Match storage — combined with read access to that storage (the S3 bucket, or the git credential stored right next to it), that is your signing identity. A git credential with *write* access additionally lets an attacker replace or delete the certificates repo's contents. |
 | **Rotation cadence** | **90 days.** |
 | **Auto-rotatable** | **No** — see "Why these cannot be auto-rotated" below. |
 
@@ -111,11 +111,15 @@ does not fit any of the credentials here, for two distinct reasons:
 | Firebase CLI token | Produced by `firebase login:ci`, an interactive OAuth consent flow in a browser against a human Google account. It is a refresh token bound to that human. |
 | Google Play service account key | Google *does* have an API (`iam.serviceAccounts.keys.create`), so this one is technically automatable — but it requires a separate long-lived GCP credential to call it, which just moves the rotation problem to a credential outside AWS with the same blast radius. Not worth it at this scale. Google's recommended answer is Workload Identity Federation, below. |
 
+The Match git credential is the exception: a GitHub fine-grained PAT or deploy
+key *can* be re-issued from a script, but the issuing credential is again one
+outside AWS. Rotate it by hand on the 90-day cadence of this secret.
+
 **Reason 2 — rotating would break the thing it protects.**
 
 | Credential | Why not |
 |---|---|
-| `MATCH_PASSWORD` | It is the symmetric key for everything already encrypted in the match bucket. Changing it does not re-encrypt them; it makes them undecryptable. Rotating it means `match nuke` + re-issuing every certificate and profile, which invalidates in-flight builds. It is rotated by a deliberate human procedure, not a Lambda. |
+| `MATCH_PASSWORD` | It is the symmetric key for everything already encrypted in Match storage (bucket or repo). Changing it does not re-encrypt them; it makes them undecryptable. Rotating it means `match nuke` + re-issuing every certificate and profile, which invalidates in-flight builds. It is rotated by a deliberate human procedure, not a Lambda. |
 | Android keystore | The key is the app's permanent identity. See above. |
 
 ### What *could* be automated for `prod/android/signing`
@@ -182,6 +186,7 @@ trail is a prerequisite, and is a follow-up item.
       revoke the old one *after* the new one is in Secrets Manager
 - [ ] Re-issue the Firebase CI token: `firebase login:ci`
 - [ ] Re-issue the Play service-account key in the GCP console
+- [ ] Match git storage only: re-issue the repo token or deploy key, read-only
 - [ ] `make populate-secrets ENV=<env>` and re-run the audit
 - [ ] Run one build per platform to confirm nothing broke before revoking the
       old credentials
@@ -231,3 +236,62 @@ Procedure:
 4. `make populate-secrets ENV=dev`
 5. `make secrets-audit ENV=dev` — every row `ok` or `n/a`
 6. Run one build per platform before deleting the backups.
+
+## Match storage: S3 or git
+
+`match_storage_mode` in `infra/environments/<env>/terraform.tfvars` (CI) and
+`MATCH_STORAGE_MODE` in `fastlane/env.<env>` (local) choose where Match keeps
+the encrypted certificates. Keep the two in agreement.
+
+| | `s3` (default) | `git` |
+|---|---|---|
+| Storage | `<prefix>-match` bucket, created by Terraform | Private repo `match_git_url`, branch `match_git_branch` |
+| CI access | CodeBuild role's temporary credentials — nothing stored | `MATCH_GIT_BASIC_AUTHORIZATION` or `MATCH_GIT_PRIVATE_KEY` in `<env>/fastlane/credentials` |
+| Shared across apps | One bucket per project | One repo for many apps/teams (a branch each, if wanted) |
+| Infra | Match bucket exists, CodeBuild may read it | No match bucket; no S3 grant for it |
+
+**The git credential.** CI only ever runs Match `readonly`, so give it read
+access and nothing more:
+
+- `match_git_auth = "https"` — a fine-grained PAT (or machine-user / GitHub App
+  token) with **Contents: read** on the one certificates repo.
+  `make populate-secrets` asks for the username and token and stores
+  `base64("<user>:<token>")`; the token is never echoed.
+- `match_git_auth = "ssh"` — a deploy key added to the repo **without** write
+  access, with no passphrase. `make populate-secrets` reads it from a file. CI
+  records the host's key in `known_hosts` on first use (TOFU); pin it in the
+  buildspec instead if your threat model needs that.
+
+Creating or renewing certificates (`fastlane ios sync_certs readonly:false`,
+`match nuke`) is a developer-machine action, using the developer's own git
+credentials with write access.
+
+**Migrating an existing project from S3 to git**
+
+1. Create the private repo and copy the encrypted files into it. Match's
+   S3 and git backends use the same encryption and the same `certs/` /
+   `profiles/` layout; S3 only adds a `<team id>/` prefix. So this is a copy,
+   not a re-issue, and `MATCH_PASSWORD` stays the same. (`fastlane match
+   migrate` does not help here: it only migrates git → Google Cloud.)
+
+   ```bash
+   git clone <match_git_url> match-certs && cd match-certs
+   git checkout -B <match_git_branch>
+   aws s3 sync "s3://<prefix>-match/<APPLE_TEAM_ID>/" .
+   git add certs profiles && git commit -m "Import Match certificates from S3"
+   git push -u origin <match_git_branch>
+   ```
+
+   Nothing is decrypted along the way — the files land in git as ciphertext.
+2. Set `MATCH_STORAGE_MODE=git`, `MATCH_GIT_URL`, `MATCH_GIT_BRANCH` in
+   `fastlane/env.<env>` and check `make sync-certs ENV=<env>` locally.
+3. Set `match_storage_mode = "git"`, `match_git_url`, `match_git_auth` in the
+   tfvars, run `make populate-secrets ENV=<env>` (it now asks for the git
+   credential), then `make infra-plan`.
+4. The plan **destroys the match bucket** (and its versioning, encryption and
+   public-access-block resources). With `force_destroy = false` the apply
+   fails while the bucket still holds objects — on purpose. Keep the bucket
+   until a CI build has signed from git, then empty it deliberately and apply.
+
+Order matters in step 3: populate before apply. Once CodeBuild references
+`MATCH_GIT_*`, a build whose secret lacks that key fails at startup.

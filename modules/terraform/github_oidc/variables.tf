@@ -37,8 +37,9 @@ variable "secret_arns" {
 }
 
 variable "match_bucket_arn" {
-  description = "ARN of the match certificates bucket (read-only access)."
+  description = "ARN of the match certificates bucket (read-only access). null when match uses git storage."
   type        = string
+  default     = null
 }
 
 variable "tags" {

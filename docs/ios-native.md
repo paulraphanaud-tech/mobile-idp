@@ -9,7 +9,7 @@ versioning and blast-radius rules, and with GitHub Actions as the CI.
 | Piece | Flutter | Native iOS |
 |---|---|---|
 | Build | `modules/fastlane/ios_build` (`flutter build`, `ios/Runner.xcworkspace`) | `modules/fastlane/ios_native` (`scan` / `gym` on your project) |
-| Signing | `match_s3`, readonly in CI | same |
+| Signing | `match` (S3 or git storage), readonly in CI | same |
 | Versioning | `common.compute_next_version`, version written to the project | same computation, passed as `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` build settings — works with `GENERATE_INFOPLIST_FILE` projects, where `increment_version_number` edits nothing |
 | App record | `produce` (`make create-app`, gated) | same |
 | CI | CodeBuild + CodePipeline (Mac fleet) | GitHub Actions on GitHub-hosted macOS runners (`docs/github-actions.md`) |
