@@ -130,6 +130,47 @@ put_secret() {
 }
 
 # =============================================================================
+# Match storage
+#
+# populate-secrets only asks for a git credential when Match uses git storage.
+# The mode is read from, in order: the MATCH_STORAGE_MODE / MATCH_GIT_AUTH
+# environment variables, the environment's terraform.tfvars (what CI is
+# provisioned with), then fastlane/env.<env> (what local runs use).
+# =============================================================================
+
+# Prints the value of `key` from a tfvars (key = "v") or dotenv (KEY=v) file.
+read_setting() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 0
+  sed -nE "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"?([^\"#]*)\"?.*$/\1/p" "$file" \
+    | head -n1 | sed -E 's/[[:space:]]+$//'
+}
+
+match_setting() {
+  local env="$1" tf_key="$2" env_key="$3" value="${!3:-}"
+  [ -n "$value" ] || value="$(read_setting "infra/environments/${env}/terraform.tfvars" "$tf_key")"
+  [ -n "$value" ] || value="$(read_setting "fastlane/env.${env}" "$env_key")"
+  # An unrendered template placeholder is not a setting.
+  [[ "$value" == *"{{"* ]] && value=""
+  echo "$value"
+}
+
+match_storage_mode_for() {
+  local mode; mode="$(match_setting "$1" match_storage_mode MATCH_STORAGE_MODE)"
+  echo "${mode:-s3}"
+}
+
+match_git_auth_for() {
+  local auth url
+  auth="$(match_setting "$1" match_git_auth MATCH_GIT_AUTH)"
+  if [ -z "$auth" ]; then
+    url="$(match_setting "$1" match_git_url MATCH_GIT_URL)"
+    case "$url" in git@*|ssh://*) auth="ssh" ;; *) auth="https" ;; esac
+  fi
+  echo "$auth"
+}
+
+# =============================================================================
 # populate-secrets
 # =============================================================================
 
@@ -185,9 +226,43 @@ cmd_populate_secrets() {
   # CodeBuild project fail at startup resolving the secret, before any phase
   # runs — which is why it is prompted for here rather than left to be set by
   # hand in the console.
+  local match_mode; match_mode="$(match_storage_mode_for "$env")"
   echo "MATCH_PASSWORD — the passphrase Match uses to encrypt certificates in"
-  echo "S3. Must match what was used to create the Match repo."
+  echo "$match_mode storage. Must match what was used to create the Match storage."
   read_secret_hidden "  match password" MATCH_PASSWORD
+
+  # Git storage: CI needs a credential for the certificates repository. Only
+  # the key infra/main.tf references for match_git_auth is written; CodeBuild
+  # does not reference either under S3 storage.
+  local match_git_basic="" match_git_key=""
+  if [ "$match_mode" = "git" ]; then
+    local match_auth; match_auth="$(match_git_auth_for "$env")"
+    echo ""
+    echo "Match uses git storage (CI auth: $match_auth). Give CI a READ-ONLY"
+    echo "credential — CI always runs match readonly, so it never needs to push."
+    if [ "$match_auth" = "ssh" ]; then
+      echo "MATCH_GIT_PRIVATE_KEY — a deploy key added to the certificates repo"
+      echo "with write access OFF. Read from a file, not pasted (multi-line)."
+      local key_path=""
+      read_secret "  path to the private key file" key_path
+      key_path="${key_path/#\~/$HOME}"
+      if [ ! -f "$key_path" ]; then
+        echo -e "${RED}No such file: $key_path${NC}"; exit 1
+      fi
+      if grep -q "ENCRYPTED" "$key_path"; then
+        echo -e "${RED}That key has a passphrase; CI cannot type it. Use a key without one.${NC}"; exit 1
+      fi
+      match_git_key="$(cat "$key_path")"
+    else
+      echo "MATCH_GIT_BASIC_AUTHORIZATION — built here from a username and a token"
+      echo "with read access to the repo (e.g. a fine-grained PAT, Contents: read)."
+      local git_user="" git_token=""
+      read_secret "  git username" git_user
+      read_secret_hidden "  token" git_token
+      match_git_basic="$(printf '%s:%s' "$git_user" "$git_token" | base64 | tr -d '\n')"
+      unset git_token
+    fi
+  fi
 
   put_secret "$p_creds" "$(jq -nc \
     --arg fb_token "$FIREBASE_CLI_TOKEN" \
@@ -195,10 +270,14 @@ cmd_populate_secrets() {
     --arg issuer_id "$ASC_ISSUER_ID" \
     --arg key_content "$ASC_KEY_CONTENT" \
     --arg match_password "$MATCH_PASSWORD" \
+    --arg match_git_basic "$match_git_basic" \
+    --arg match_git_key "$match_git_key" \
     '{FIREBASE_CLI_TOKEN:$fb_token, APP_STORE_CONNECT_KEY_ID:$key_id,
       APP_STORE_CONNECT_ISSUER_ID:$issuer_id,
       APP_STORE_CONNECT_KEY_CONTENT:$key_content,
-      MATCH_PASSWORD:$match_password}')" "$region"
+      MATCH_PASSWORD:$match_password}
+     + (if $match_git_basic != "" then {MATCH_GIT_BASIC_AUTHORIZATION:$match_git_basic} else {} end)
+     + (if $match_git_key != "" then {MATCH_GIT_PRIVATE_KEY:$match_git_key} else {} end)')" "$region"
 
   # --- Android signing ---
   local p_signing; p_signing="$(secret_path android_signing "$env")"

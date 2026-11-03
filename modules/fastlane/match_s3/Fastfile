@@ -1,34 +1,16 @@
 # =============================================================================
-# Module: Match S3
-# Provides: sync_certificates(cert_type, readonly)
+# Module: Match S3 — DEPRECATED, kept so existing projects keep working.
+#
+# sync_certificates now lives in modules/fastlane/match, which supports both S3
+# and git storage (MATCH_STORAGE_MODE). Projects bootstrapped before that
+# change import this file; it loads the new module, so behaviour is unchanged
+# for them (MATCH_STORAGE_MODE unset means s3).
+#
+# To migrate, change the import in fastlane/Fastfile to
+#   import "../<modules>/fastlane/match/Fastfile"
 # =============================================================================
 
-def sync_certificates(cert_type, readonly)
-  app_identifier = ENV['APP_IDENTIFIER']
-  team_id = ENV['APPLE_TEAM_ID']
-  s3_bucket = ENV['MATCH_S3_BUCKET']
-  aws_region = ENV['AWS_REGION'] || 'eu-central-1'
-
-  # aws-sdk-ruby ignores AWS_CA_BUNDLE (it is a client option, not an env
-  # var, unlike the AWS CLI). Applying it globally lets CI point Ruby at a
-  # working CA bundle — the CodeBuild macOS image's default OpenSSL trust
-  # configuration fails S3 TLS with "certificate verify failed (unable to
-  # get certificate CRL)" even though the AWS CLI connects fine.
-  if ENV['AWS_CA_BUNDLE'] && !ENV['AWS_CA_BUNDLE'].empty?
-    require 'aws-sdk-s3'
-    Aws.config[:ssl_ca_bundle] = ENV['AWS_CA_BUNDLE']
-    UI.message("Using AWS_CA_BUNDLE for aws-sdk TLS: #{ENV['AWS_CA_BUNDLE']}")
-  end
-
-  match(
-    type: cert_type || "development",
-    app_identifier: [app_identifier],
-    team_id: team_id,
-    storage_mode: "s3",
-    s3_bucket: s3_bucket,
-    s3_region: aws_region,
-    readonly: readonly != false
-  )
-
-  UI.message("Certificates synced (type: #{cert_type})!")
-end
+instance_eval(
+  File.read(File.expand_path('../match/Fastfile', File.dirname(__FILE__)), encoding: 'UTF-8'),
+  File.expand_path('../match/Fastfile', File.dirname(__FILE__))
+)

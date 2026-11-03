@@ -5,7 +5,13 @@ env:
     FASTLANE_ENV: "dev"
     TARGET: "app_distrib"
     BUMP: "patch"
+    # Match storage: "s3" (MATCH_S3_BUCKET) or "git" (MATCH_GIT_URL, plus a
+    # credential from Secrets Manager). Like everything here, overridden by
+    # the CodeBuild project's variables — see match_storage_mode in tfvars.
+    MATCH_STORAGE_MODE: "{{MATCH_STORAGE_MODE}}"
     MATCH_S3_BUCKET: "{{PROJECT_NAME}}-match"
+    MATCH_GIT_URL: "{{MATCH_GIT_URL}}"
+    MATCH_GIT_BRANCH: "{{MATCH_GIT_BRANCH}}"
     FL_AWS_REGION: "{{AWS_REGION}}"
     MATCH_KEYCHAIN_NAME: "fastlane_tmp.keychain"
     # Deliberately empty. A password-protected keychain does not stay
@@ -111,7 +117,27 @@ phases:
       # "certificate verify failed (unable to get certificate CRL)". Confirm
       # IAM/network are fine via the AWS CLI, then point Ruby at a known good
       # CA bundle — the failure is Ruby's OpenSSL trust store, not access.
-      - aws s3 ls "s3://${MATCH_S3_BUCKET}/" --region "${AWS_REGION}" >/dev/null && echo "S3 reachable via AWS CLI"
+      #
+      # Under git storage there is no match bucket; probe the repository
+      # instead, so a missing or wrong credential fails here with git's own
+      # message rather than inside match. The Fastfile does the real auth
+      # (header or deploy key) — this only checks reachability for HTTPS.
+      - |
+        if [ "${MATCH_STORAGE_MODE:-s3}" = "git" ]; then
+          echo "Match storage: git (${MATCH_GIT_URL}, branch ${MATCH_GIT_BRANCH:-main})"
+          case "$MATCH_GIT_URL" in
+            https://*)
+              if [ -n "${MATCH_GIT_BASIC_AUTHORIZATION:-}" ]; then
+                git -c http.extraheader="Authorization: Basic ${MATCH_GIT_BASIC_AUTHORIZATION}" \
+                  ls-remote --exit-code --heads "$MATCH_GIT_URL" "${MATCH_GIT_BRANCH:-main}" >/dev/null \
+                  && echo "Match repository and branch reachable" \
+                  || { echo "ERROR: cannot read branch '${MATCH_GIT_BRANCH:-main}' of $MATCH_GIT_URL — check MATCH_GIT_BASIC_AUTHORIZATION and that match has been run once for this branch"; exit 1; }
+              fi ;;
+            *) echo "SSH URL — reachability is checked by match itself" ;;
+          esac
+        else
+          aws s3 ls "s3://${MATCH_S3_BUCKET}/" --region "${AWS_REGION}" >/dev/null && echo "S3 reachable via AWS CLI"
+        fi
       - |
         curl -fsSL https://curl.se/ca/cacert.pem -o "$HOME/cacert.pem"
         export SSL_CERT_FILE="$HOME/cacert.pem"

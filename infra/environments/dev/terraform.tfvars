@@ -36,3 +36,17 @@ tags = {
   Environment = "dev"
   Team        = "mobile"
 }
+
+# iOS signing — where Fastlane Match keeps the encrypted certificates.
+#
+#   "s3"   The per-project <prefix>-match bucket. Nothing else to configure.
+#   "git"  A private repo. Set match_git_url, and match_git_auth to "https"
+#          (base64 user:token) or "ssh" (deploy key); `make populate-secrets`
+#          stores that credential. No match bucket is created.
+#
+# Keep fastlane/env.<env> (MATCH_STORAGE_MODE, MATCH_GIT_URL, MATCH_GIT_BRANCH)
+# in agreement — it drives local runs, this drives CI.
+match_storage_mode = "{{MATCH_STORAGE_MODE}}"
+match_git_url      = "{{MATCH_GIT_URL}}"
+match_git_branch   = "{{MATCH_GIT_BRANCH}}"
+match_git_auth     = "{{MATCH_GIT_AUTH}}"

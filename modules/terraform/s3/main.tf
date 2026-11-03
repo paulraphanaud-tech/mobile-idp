@@ -7,8 +7,12 @@
 ################################################################################
 
 # ---------- Match bucket (Fastlane Match) ------------------------------------
+#
+# Only when Match stores certificates in S3. With git storage the certificates
+# live in a repository and this bucket would sit empty.
 
 resource "aws_s3_bucket" "match" {
+  count         = var.create_match_bucket ? 1 : 0
   bucket        = "${var.project_name}-match"
   force_destroy = false
 
@@ -19,7 +23,8 @@ resource "aws_s3_bucket" "match" {
 }
 
 resource "aws_s3_bucket_versioning" "match" {
-  bucket = aws_s3_bucket.match.id
+  count  = var.create_match_bucket ? 1 : 0
+  bucket = aws_s3_bucket.match[0].id
 
   versioning_configuration {
     status = "Enabled"
@@ -27,7 +32,8 @@ resource "aws_s3_bucket_versioning" "match" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "match" {
-  bucket = aws_s3_bucket.match.id
+  count  = var.create_match_bucket ? 1 : 0
+  bucket = aws_s3_bucket.match[0].id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -37,12 +43,36 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "match" {
 }
 
 resource "aws_s3_bucket_public_access_block" "match" {
-  bucket = aws_s3_bucket.match.id
+  count  = var.create_match_bucket ? 1 : 0
+  bucket = aws_s3_bucket.match[0].id
 
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# These resources had no count before git storage was supported. The moved
+# blocks keep existing projects' bucket at its old state address, so upgrading
+# the module plans no replacement of signing material.
+moved {
+  from = aws_s3_bucket.match
+  to   = aws_s3_bucket.match[0]
+}
+
+moved {
+  from = aws_s3_bucket_versioning.match
+  to   = aws_s3_bucket_versioning.match[0]
+}
+
+moved {
+  from = aws_s3_bucket_server_side_encryption_configuration.match
+  to   = aws_s3_bucket_server_side_encryption_configuration.match[0]
+}
+
+moved {
+  from = aws_s3_bucket_public_access_block.match
+  to   = aws_s3_bucket_public_access_block.match[0]
 }
 
 # ---------- Keystore bucket (Android) ----------------------------------------

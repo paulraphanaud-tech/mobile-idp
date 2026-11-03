@@ -13,7 +13,7 @@ This repository has reusable Fastlane modules in `modules/fastlane/`:
 - `ios_deploy_firebase` — Deploy iOS to Firebase App Distribution
 - `ios_deploy_testflight` — Deploy iOS to TestFlight/App Store Connect
 - `keystore` — Android keystore management (generate/upload/download from S3)
-- `match_s3` — iOS certificate & profile management via S3
+- `match` — iOS certificate & profile management via Fastlane Match (S3 or git storage; `match_s3` is the deprecated alias)
 - `produce` — Create app on App Store Connect
 
 ## Step 1 — Platforms & Deployment Targets
@@ -56,7 +56,7 @@ Ask the user:
 ### iOS (if applicable):
 1. **Apple Team ID** — Found at developer.apple.com → Membership
 2. **Apple Username** — Apple ID email
-3. **Match S3 bucket** — Bucket name for Fastlane Match certificate storage (or use default)
+3. **Match storage** — `s3` (bucket name, or the default) or `git` (private repo URL + branch). See `/setup-ios` Step 3.
 4. **Certificate types needed** — Development, distribution, ad-hoc?
 
 ## Step 5 — Deployment Credentials
