@@ -22,6 +22,12 @@
 #
 # Either way the files are encrypted with MATCH_PASSWORD before they leave the
 # machine; the storage only ever sees ciphertext.
+#
+# IDP_MATCH_STORAGE_MODE / IDP_MATCH_GIT_URL / IDP_MATCH_GIT_BRANCH, when set,
+# win over the MATCH_* values. The GitHub Actions workflows set them: the
+# Fastfile's before_all overloads fastlane/env.<env> on top of the process
+# environment, so a project bootstrapped for CodeBuild (MATCH_STORAGE_MODE=s3
+# in its env file) would otherwise silently ignore the workflow's choice.
 # =============================================================================
 
 MATCH_STORAGE_MODES = %w[s3 git].freeze
@@ -36,8 +42,13 @@ MATCH_GIT_CREDENTIAL_VARS = %w[
   MATCH_GIT_PRIVATE_KEY
 ].freeze
 
+def match_env(name)
+  override = ENV["IDP_#{name}"].to_s.strip
+  override.empty? ? ENV[name].to_s.strip : override
+end
+
 def match_storage_mode
-  mode = ENV['MATCH_STORAGE_MODE'].to_s.strip.downcase
+  mode = match_env('MATCH_STORAGE_MODE').downcase
   mode = 's3' if mode.empty?
   unless MATCH_STORAGE_MODES.include?(mode)
     UI.user_error!("MATCH_STORAGE_MODE must be one of #{MATCH_STORAGE_MODES.join(', ')} (got '#{mode}')")
@@ -94,7 +105,7 @@ end
 # Git
 # -----------------------------------------------------------------------------
 def match_git_options(readonly)
-  git_url = ENV['MATCH_GIT_URL'].to_s.strip
+  git_url = match_env('MATCH_GIT_URL')
   UI.user_error!("MATCH_STORAGE_MODE=git needs MATCH_GIT_URL (the private certificates repository)") if git_url.empty?
 
   MATCH_GIT_CREDENTIAL_VARS.each { |k| ENV.delete(k) if ENV[k].to_s.strip.empty? }
@@ -119,7 +130,7 @@ def match_git_options(readonly)
 
   {
     git_url: git_url,
-    git_branch: ENV['MATCH_GIT_BRANCH'].to_s.empty? ? 'main' : ENV['MATCH_GIT_BRANCH'],
+    git_branch: match_env('MATCH_GIT_BRANCH').empty? ? 'main' : match_env('MATCH_GIT_BRANCH'),
     # A readonly sync needs the branch tip only; a full clone of a long-lived
     # certificates repo is wasted time on a Mac fleet billed by the minute.
     # Not for a writing run: the first sync on a new branch must be able to

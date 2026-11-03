@@ -12,15 +12,23 @@ set -euo pipefail
 #
 # Options:
 #   --type ios-native|flutter   default: detected (pubspec.yaml → flutter, *.xcodeproj → ios-native)
-#   --workflows LIST            comma-separated. ios-native: ci,preview,testflight
-#                               flutter: ci,preview (Android APK),ios-preview (simulator).
+#   --workflows LIST            comma-separated.
+#                               ios-native: ci, preview, distribute (TestFlight or
+#                                 Firebase; `testflight` is an alias), signing
+#                               flutter: ci, preview (Android APK), ios-preview
+#                                 (simulator), distribute (Android → Firebase,
+#                                 iOS → TestFlight or Firebase), signing
 #                               Default: ci,preview (ios-native); flutter: ci plus
 #                               ios-preview if ios/ exists, preview if android/ exists
-#                               or neither does
+#                               or neither does. distribute/signing are opt-in.
 #   --app-dir DIR               flutter: app directory relative to the repo root;
 #                               default: . if ./pubspec.yaml, else the only app pubspec
 #   --org ORG                   flutter: reverse-domain org for `flutter create` when
-#                               a platform folder is missing; default: com.example
+#                               a platform folder is missing; default: ORG from
+#                               .idp.env, else com.example
+#   --signing-key-id ID         flutter distribute/signing: which Android key in the
+#                               signing repo; default: SIGNING_KEY_ID or PROJECT_NAME
+#                               from .idp.env, else the repo directory name
 #   --scheme NAME               default: SCHEME from .idp.env
 #   --xcodeproj PATH            default: XCODE_PROJECT from .idp.env
 #   --workspace PATH            default: XCODE_WORKSPACE from .idp.env
@@ -48,7 +56,7 @@ UPLOAD_ARTIFACT_VERSION="v6"
 AWS_CREDENTIALS_VERSION="v6"
 
 TYPE="" WORKFLOWS="" RUNNER="macos-latest" XCODE_VERSION="latest-stable" TIMEOUT="30" DEPLOY_TIMEOUT="45"
-DEFAULT_BRANCH="main" APP_DIR="" ORG="com.example" BUILD_ONLY=0 OUT=".github/workflows" FORCE=0 DRY_RUN=0
+DEFAULT_BRANCH="main" APP_DIR="" ARG_ORG="" ARG_SIGNING_KEY_ID="" BUILD_ONLY=0 OUT=".github/workflows" FORCE=0 DRY_RUN=0
 ARG_SCHEME="" ARG_PROJECT="" ARG_WORKSPACE=""
 
 while [ $# -gt 0 ]; do
@@ -63,12 +71,13 @@ while [ $# -gt 0 ]; do
     --timeout)        TIMEOUT="$2"; shift 2 ;;
     --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
     --app-dir)        APP_DIR="$2"; shift 2 ;;
-    --org)            ORG="$2"; shift 2 ;;
+    --org)            ARG_ORG="$2"; shift 2 ;;
     --build-only)     BUILD_ONLY=1; shift ;;
     --out)            OUT="$2"; shift 2 ;;
     --force)          FORCE=1; shift ;;
     --dry-run)        DRY_RUN=1; shift ;;
-    -h|--help)        sed -n '3,36p' "$0"; exit 0 ;;
+    --signing-key-id) ARG_SIGNING_KEY_ID="$2"; shift 2 ;;
+    -h|--help)        sed -n '3,45p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -78,11 +87,13 @@ fail() { echo "[generate-github-actions] ERROR: $*" >&2; exit 1; }
 
 # Values recorded by bootstrap-ios-native.sh, if present.
 SCHEME="" XCODE_PROJECT="" XCODE_WORKSPACE="" IDP_REPO="paulraphanaud-tech/mobile-idp" IDP_REF="main"
-AWS_REGION="eu-west-1" GITHUB_REPO="OWNER/REPO" IDP_PROJECT_TYPE=""
+AWS_REGION="eu-west-1" GITHUB_REPO="OWNER/REPO" IDP_PROJECT_TYPE="" ORG="" PROJECT_NAME="" SIGNING_KEY_ID=""
 if [ -f .idp.env ]; then
   # shellcheck disable=SC1091
   set -a; . ./.idp.env; set +a
 fi
+ORG="${ARG_ORG:-${ORG:-com.example}}"
+SIGNING_KEY_ID="${ARG_SIGNING_KEY_ID:-${SIGNING_KEY_ID:-${PROJECT_NAME:-$(basename "$(pwd)" | tr '[:upper:]_ ' '[:lower:]--')}}}"
 SCHEME="${ARG_SCHEME:-$SCHEME}"
 XCODE_PROJECT="${ARG_PROJECT:-$XCODE_PROJECT}"
 XCODE_WORKSPACE="${ARG_WORKSPACE:-$XCODE_WORKSPACE}"
@@ -166,6 +177,7 @@ render() {
     -e "s|@@APP_DIR@@|$(esc "$APP_DIR")|g" \
     -e "s|@@APP_PREFIX@@|$(esc "$APP_PREFIX")|g" \
     -e "s|@@ORG@@|$(esc "$ORG")|g" \
+    -e "s|@@SIGNING_KEY_ID@@|$(esc "$SIGNING_KEY_ID")|g" \
     "$src")"
   if printf '%s' "$content" | grep -q '@@[A-Z_]*@@'; then
     fail "unrendered placeholder in $dest: $(printf '%s' "$content" | grep -o '@@[A-Z_]*@@' | sort -u | tr '\n' ' ')"
@@ -187,10 +199,14 @@ for wf in "${wanted[@]}"; do
   case "$TYPE:$wf" in
     ios-native:ci)         render "$TPL/workflows/ios-native-ci.yml"         "$OUT/ios-ci.yml" ;;
     ios-native:preview)    render "$TPL/workflows/ios-native-preview.yml"    "$OUT/ios-preview.yml" ;;
-    ios-native:testflight) render "$TPL/workflows/ios-native-testflight.yml" "$OUT/ios-testflight.yml" ;;
+    ios-native:distribute|ios-native:testflight)
+                           render "$TPL/workflows/ios-native-distribute.yml" "$OUT/distribute.yml" ;;
+    ios-native:signing)    render "$TPL/workflows/ios-native-signing-setup.yml" "$OUT/signing-setup.yml" ;;
     flutter:ci)            render "$TPL/workflows/flutter-ci.yml"            "$OUT/flutter-ci.yml" ;;
     flutter:preview)       render "$TPL/workflows/flutter-preview.yml"       "$OUT/flutter-preview.yml" ;;
     flutter:ios-preview)   render "$TPL/workflows/flutter-ios-preview.yml"   "$OUT/flutter-ios-preview.yml" ;;
+    flutter:distribute)    render "$TPL/workflows/flutter-distribute.yml"    "$OUT/distribute.yml" ;;
+    flutter:signing)       render "$TPL/workflows/flutter-signing-setup.yml" "$OUT/signing-setup.yml" ;;
     *) fail "workflow '$wf' is not available for type $TYPE" ;;
   esac
 done
