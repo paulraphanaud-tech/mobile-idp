@@ -51,7 +51,7 @@ platform :ios do
     test_ios_native
   end
 
-  # Unsigned simulator .app, zipped (for Appetize browser previews).
+  # Unsigned simulator .app, zipped (attached to preview runs).
   lane :build_simulator do
     build_ios_native_simulator
   end

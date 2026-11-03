@@ -1,6 +1,6 @@
 ---
 name: generate-github-actions
-description: Generate GitHub Actions workflows for an app onboarded on the mobile IDP — simulator CI, browser previews (Appetize) and TestFlight for native iOS/SwiftUI, analyze+test for Flutter. Use when asked to add, regenerate or update CI/GitHub Actions for an app repo.
+description: Generate GitHub Actions workflows for an app onboarded on the mobile IDP — simulator CI, preview builds attached as artifacts and TestFlight for native iOS/SwiftUI, analyze+test for Flutter. Use when asked to add, regenerate or update CI/GitHub Actions for an app repo.
 ---
 
 # Generate GitHub Actions workflows
@@ -55,11 +55,11 @@ actionlint .github/workflows/*.yml
 | Workflow | Needs | Cost/risk |
 |---|---|---|
 | `ios-ci.yml` | Nothing. Runs on every push. | Tier 1. ~5–10 macOS minutes per run. |
-| `ios-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, repo variable `APPETIZE_PUBLIC_KEY`. Without them it still attaches the zipped simulator `.app`. | Tier 1. Runs on the default branch + manually. |
+| `ios-preview.yml` | Nothing. Attaches the zipped simulator `.app` to the run. | Tier 1. Runs on the default branch + manually. |
 | `ios-testflight.yml` | IDP infra with `github_actions_repositories = ["owner/repo"]` applied (Tier 3 gate — the **user** runs `make infra-apply`), a GitHub environment named like the IDP env with variable `AWS_ROLE_ARN`, Apple Team ID set in `fastlane/env.<env>`, an App Store Connect app record (`make create-app`, Tier 3), and populated `<env>/fastlane/credentials`. | Tier 2: consumes a build number forever. Manual trigger only. |
 | `flutter-ci.yml` | Nothing. Linux runner. | Tier 1. |
-| `flutter-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, variable `APPETIZE_PUBLIC_KEY_ANDROID`. Without it the debug APK is attached (installable on an Android phone). | Tier 1. Linux. Default branch + manual. |
-| `flutter-ios-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, variable `APPETIZE_PUBLIC_KEY_IOS`. | Tier 1. macOS (10x on private repos). Default branch + manual. |
+| `flutter-preview.yml` | Nothing. Attaches the debug APK (installable on an Android phone). | Tier 1. Linux. Default branch + manual. |
+| `flutter-ios-preview.yml` | Nothing. Attaches the zipped simulator `Runner.app`. | Tier 1. macOS (10x on private repos). Default branch + manual. |
 
 ## Rules
 

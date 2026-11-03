@@ -95,14 +95,12 @@ to make it pass; if a test is wrong, say so explicitly.
 
 - CI result and the run URL; test counts from the job summary.
 - **Run it without a Mac**:
-  - Browser: `ios-preview.yml` streams the app via Appetize once the user adds
-    the `APPETIZE_API_TOKEN` secret (Settings → Secrets and variables →
-    Actions), then saves the printed key as variable `APPETIZE_PUBLIC_KEY`. It
-    runs on pushes to the default branch, or manually from the Actions tab.
-    Without the token, the zipped simulator `.app` is attached to the run.
-  - Flutter: same Appetize secret; variables `APPETIZE_PUBLIC_KEY_IOS` /
-    `APPETIZE_PUBLIC_KEY_ANDROID`. The Android APK artifact also installs
-    directly on an Android phone.
+  - Simulator build: `ios-preview.yml` attaches the zipped simulator `.app` to
+    the run (pushes to the default branch, or manually from the Actions tab).
+    No secrets needed.
+  - Flutter: `flutter-ios-preview.yml` attaches the simulator build;
+    `flutter-preview.yml` attaches a debug APK that installs directly on an
+    Android phone.
   - iPhone: TestFlight via `ios-testflight.yml` — list the one-time
     prerequisites from the `generate-github-actions` skill (step 4).
 - Open a PR with `gh api repos/<o>/<r>/pulls -f title=... -f head=idp/connect -f base=<base> -F body=@body.md`.

@@ -100,8 +100,8 @@ def test_ios_native
   )
 end
 
-# Unsigned Debug build for the simulator, zipped. This is what browser
-# streaming services (Appetize) run — no Apple account needed.
+# Unsigned Debug build for the simulator, zipped. Runs on any
+# simulator — no Apple account needed.
 def build_ios_native_simulator
   root = ios_native_root
   derived = File.join(root, "build", "sim")
