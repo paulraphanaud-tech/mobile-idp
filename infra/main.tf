@@ -220,3 +220,28 @@ module "firebase" {
   ios_bundle_id        = var.ios_bundle_id
   apple_team_id        = var.apple_team_id
 }
+
+# =============================================================================
+# GitHub Actions (OIDC) — optional
+#
+# Off unless github_actions_repositories is non-empty, so existing stacks plan
+# no change. Lets GitHub-hosted runners do signed iOS builds (the generated
+# ios-testflight.yml) with temporary credentials: read the fastlane secrets of
+# this environment and read the match bucket. See docs/github-actions.md.
+# =============================================================================
+module "github_oidc" {
+  source = "../modules/terraform/github_oidc"
+  count  = length(var.github_actions_repositories) > 0 ? 1 : 0
+
+  project_name               = local.name_prefix
+  repositories               = var.github_actions_repositories
+  github_environments        = length(var.github_actions_environments) > 0 ? var.github_actions_environments : [var.environment]
+  create_oidc_provider       = var.github_oidc_provider_arn == ""
+  existing_oidc_provider_arn = var.github_oidc_provider_arn
+  secret_arns = [
+    for key, arn in module.secrets.secret_arns_map : arn
+    if contains([local.secret_paths.fastlane_config, local.secret_paths.fastlane_creds], key)
+  ]
+  match_bucket_arn = module.s3.match_bucket_arn
+  tags             = var.tags
+}

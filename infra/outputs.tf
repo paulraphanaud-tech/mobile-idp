@@ -93,3 +93,16 @@ output "feature_flags_backend" {
   description = "Which flag backend this environment is configured for. scripts/flags.sh reads it to decide where to publish."
   value       = var.feature_flags_backend
 }
+
+# =============================================================================
+# GitHub Actions (OIDC)
+# =============================================================================
+output "github_actions_role_arn" {
+  description = "AWS_ROLE_ARN for the GitHub environment (null when GitHub Actions is off)."
+  value       = try(module.github_oidc[0].role_arn, null)
+}
+
+output "github_oidc_provider_arn" {
+  description = "Pass to other stacks in this account as github_oidc_provider_arn."
+  value       = try(module.github_oidc[0].oidc_provider_arn, null)
+}

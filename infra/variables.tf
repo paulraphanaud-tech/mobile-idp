@@ -200,3 +200,32 @@ variable "flags_price_class" {
   type        = string
   default     = "PriceClass_100"
 }
+
+# =============================================================================
+# GitHub Actions (OIDC)
+# =============================================================================
+variable "github_actions_repositories" {
+  description = <<-EOT
+    GitHub repositories (owner/repo) whose Actions jobs may assume an AWS role
+    for signed iOS builds. Empty (the default) creates nothing.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "github_actions_environments" {
+  description = "GitHub environment names allowed to assume the role. Empty = [var.environment]."
+  type        = list(string)
+  default     = []
+}
+
+variable "github_oidc_provider_arn" {
+  description = <<-EOT
+    ARN of an existing token.actions.githubusercontent.com OIDC provider in
+    this account. Empty = create one. Only one can exist per account, so the
+    second stack in an account must pass the first one's ARN (see the
+    github_oidc_provider_arn output).
+  EOT
+  type        = string
+  default     = ""
+}

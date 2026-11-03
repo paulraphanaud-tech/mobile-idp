@@ -1,0 +1,202 @@
+# =============================================================================
+# Module: iOS Native (Xcode / SwiftUI / UIKit — no Flutter)
+# Provides: ios_native_root, ios_native_container_args, ios_native_ipa_path,
+#           test_ios_native, build_ios_native_simulator,
+#           build_ios_native(version, bump, latest_build_number, latest_version),
+#           deploy_ios_native_to_testflight(version, bump)
+# Requires: common module (compute_next_version)
+#           match_s3 module (sync_certificates) for signed builds
+#
+# The Flutter ios_build module assumes ios/Runner.xcworkspace and runs
+# `flutter build`. A native project has neither, so it gets its own module;
+# signing (match_s3) and versioning (common) are shared.
+#
+# ENV (all optional except APP_IDENTIFIER / APPLE_TEAM_ID for signed builds):
+#   XCODE_WORKSPACE   path to .xcworkspace (wins over XCODE_PROJECT when set)
+#   XCODE_PROJECT     path to .xcodeproj  (auto-detected at repo root if unset)
+#   SCHEME            shared scheme to build (defaults to the project name)
+#   APP_TARGET        target whose signing is configured (defaults to SCHEME)
+#   CONFIGURATION     build configuration for archives (default Release)
+#   EXPORT_METHOD     app-store | ad-hoc | development | enterprise (default app-store)
+#   SIMULATOR_DEVICE  e.g. "iPhone 16" (default: first available iPhone)
+# =============================================================================
+
+require 'json'
+require 'shellwords'
+
+# Walks up from Dir.pwd to the folder holding the Xcode project — same reason
+# as flutter_project_root: fastlane's working directory differs between real
+# actions (project root) and a bare `sh` (fastlane/).
+def ios_native_root
+  dir = Dir.pwd
+  until dir == "/"
+    return dir if Dir.glob(File.join(dir, "*.{xcodeproj,xcworkspace}")).any? ||
+                  (ENV['XCODE_PROJECT'] && File.exist?(File.join(dir, ENV['XCODE_PROJECT'])))
+    dir = File.dirname(dir)
+  end
+  UI.user_error!("Could not find an .xcodeproj/.xcworkspace at or above #{Dir.pwd}")
+end
+
+def ios_native_project_path
+  root = ios_native_root
+  explicit = ENV['XCODE_PROJECT'].to_s.strip
+  return File.join(root, explicit) unless explicit.empty?
+
+  candidates = Dir.glob(File.join(root, "*.xcodeproj")).reject { |p| p.end_with?("Pods.xcodeproj") }
+  UI.user_error!("No .xcodeproj at #{root}; set XCODE_PROJECT") if candidates.empty?
+  UI.user_error!("Several .xcodeproj at #{root}; set XCODE_PROJECT") if candidates.size > 1
+  candidates.first
+end
+
+def ios_native_workspace_path
+  explicit = ENV['XCODE_WORKSPACE'].to_s.strip
+  return nil if explicit.empty?
+  File.join(ios_native_root, explicit)
+end
+
+def ios_native_scheme
+  scheme = ENV['SCHEME'].to_s.strip
+  scheme.empty? ? File.basename(ios_native_project_path, ".xcodeproj") : scheme
+end
+
+# Hash for gym/scan: either { workspace: } or { project: }.
+def ios_native_container_args
+  ws = ios_native_workspace_path
+  ws ? { workspace: ws } : { project: ios_native_project_path }
+end
+
+def ios_native_ipa_path
+  File.join(ios_native_root, "build", "ios", "ipa", "#{ios_native_scheme}.ipa")
+end
+
+# First available iPhone simulator, so the lane works on any runner image
+# without hard-coding a model that the next Xcode release drops.
+def ios_native_simulator_device
+  wanted = ENV['SIMULATOR_DEVICE'].to_s.strip
+  return wanted unless wanted.empty?
+
+  json = JSON.parse(sh("xcrun simctl list devices available --json", log: false))
+  iphones = json["devices"]
+            .select { |runtime, _| runtime.include?("iOS") }
+            .sort_by { |runtime, _| runtime }
+            .reverse
+            .flat_map { |_, devices| devices }
+            .select { |d| d["name"].start_with?("iPhone") }
+  UI.user_error!("No available iPhone simulator on this machine") if iphones.empty?
+  iphones.first["name"]
+end
+
+# Unit/UI tests on a simulator. Needs no signing and no secrets, so it is the
+# lane CI runs on every push.
+def test_ios_native
+  scan(
+    **ios_native_container_args,
+    scheme: ios_native_scheme,
+    device: ios_native_simulator_device,
+    result_bundle: true,
+    output_directory: File.join(ios_native_root, "build", "test-results"),
+    code_coverage: true,
+    fail_build: true,
+  )
+end
+
+# Unsigned Debug build for the simulator, zipped. This is what browser
+# streaming services (Appetize) run — no Apple account needed.
+def build_ios_native_simulator
+  root = ios_native_root
+  derived = File.join(root, "build", "sim")
+  container = ios_native_container_args
+  container_flag = container[:workspace] ? "-workspace #{container[:workspace].shellescape}" : "-project #{container[:project].shellescape}"
+
+  sh("xcodebuild #{container_flag} -scheme #{ios_native_scheme.shellescape} " \
+     "-configuration Debug -sdk iphonesimulator -derivedDataPath #{derived.shellescape} " \
+     "CODE_SIGNING_ALLOWED=NO build")
+
+  app = Dir.glob(File.join(derived, "Build", "Products", "Debug-iphonesimulator", "*.app")).first
+  UI.user_error!("Simulator .app not found under #{derived}") unless app
+  zip_path = File.join(root, "build", "#{ios_native_scheme}-simulator.zip")
+  sh("cd #{File.dirname(app).shellescape} && ditto -c -k --sequesterRsrc --keepParent #{File.basename(app).shellescape} #{zip_path.shellescape}")
+  UI.success("Simulator build: #{zip_path}")
+  zip_path
+end
+
+MATCH_TYPE_FOR_NATIVE_EXPORT = {
+  "app-store"   => ["appstore", "AppStore"],
+  "ad-hoc"      => ["adhoc", "AdHoc"],
+  "development" => ["development", "Development"],
+  "enterprise"  => ["enterprise", "InHouse"],
+}.freeze
+
+# Signed archive + export. Version and build number are passed as build
+# settings rather than written into the project: modern Xcode projects use
+# GENERATE_INFOPLIST_FILE with MARKETING_VERSION / CURRENT_PROJECT_VERSION,
+# where agvtool-based increment_version_number edits nothing useful.
+def build_ios_native(version, bump, latest_build_number, latest_version)
+  app_identifier = ENV['APP_IDENTIFIER']
+  team_id = ENV['APPLE_TEAM_ID']
+  UI.user_error!("APP_IDENTIFIER is required for a signed build") if app_identifier.to_s.empty?
+  UI.user_error!("APPLE_TEAM_ID is required for a signed build") if team_id.to_s.empty?
+
+  export_method = (ENV['EXPORT_METHOD'] || "app-store").strip
+  match_type, profile_kind = MATCH_TYPE_FOR_NATIVE_EXPORT[export_method]
+  UI.user_error!("Unsupported EXPORT_METHOD '#{export_method}'") if match_type.nil?
+
+  build_version, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
+  configuration = (ENV['CONFIGURATION'] || "Release").strip
+  scheme = ios_native_scheme
+  target = (ENV['APP_TARGET'] || scheme).strip
+  profile_name = "match #{profile_kind} #{app_identifier}"
+
+  # Always readonly from here: a build must never create or revoke a cert.
+  sync_certificates(match_type, true)
+
+  # Manual signing on the app target only — xcargs would hit every target,
+  # including Swift packages, which reject provisioning profiles.
+  update_code_signing_settings(
+    path: ios_native_project_path,
+    use_automatic_signing: false,
+    targets: [target],
+    build_configurations: [configuration],
+    team_id: team_id,
+    code_sign_identity: export_method == "development" ? "Apple Development" : "Apple Distribution",
+    profile_name: profile_name,
+    bundle_identifier: app_identifier,
+  )
+
+  gym(
+    **ios_native_container_args,
+    scheme: scheme,
+    configuration: configuration,
+    export_method: export_method,
+    export_options: { provisioningProfiles: { app_identifier => profile_name } },
+    xcargs: "MARKETING_VERSION=#{build_version} CURRENT_PROJECT_VERSION=#{build_number}",
+    output_directory: File.dirname(ios_native_ipa_path),
+    output_name: File.basename(ios_native_ipa_path),
+    clean: true,
+  )
+
+  UI.success("Built #{scheme} #{build_version} (#{build_number})")
+end
+
+def deploy_ios_native_to_testflight(version, bump)
+  app_identifier = ENV['APP_IDENTIFIER']
+
+  app_store_build_number(app_identifier: app_identifier, live: false, initial_build_number: 0)
+  latest_build_number = lane_context[SharedValues::LATEST_BUILD_NUMBER]
+  latest_version = lane_context[SharedValues::LATEST_VERSION]
+
+  build_ios_native(version, bump, latest_build_number, latest_version)
+
+  groups = ENV['APP_STORE_TESTER_GROUP'].to_s.strip
+  upload_to_testflight(
+    ipa: ios_native_ipa_path,
+    skip_waiting_for_build_processing: true,
+    changelog: ENV['RELEASE_NOTES'] || "Built by CI",
+    # Internal testers only by default: external groups trigger Beta App
+    # Review, which a first upload of an unreviewed app cannot pass silently.
+    distribute_external: false,
+    groups: groups.empty? ? nil : groups.split(","),
+  )
+
+  UI.success("Uploaded #{ios_native_scheme} to TestFlight")
+end
