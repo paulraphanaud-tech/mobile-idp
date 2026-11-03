@@ -45,6 +45,14 @@ Add `testflight` to `--workflows` only if the user asks for TestFlight.
 CodeBuild pipeline — that is the `bootstrap` wizard, not this skill. For cloud
 testing alone, run
 `bash /tmp/mobile-idp/scripts/generate-github-actions.sh --type flutter`.
+It finds the app directory (monorepos too; `--app-dir` if ambiguous) and
+writes `flutter-ci.yml` plus a preview per platform present —
+`flutter-ios-preview.yml` (macOS simulator build) and/or
+`flutter-preview.yml` (Android debug APK on Linux; the default when the app
+has no platform folders). Missing `ios/`/`android/` projects are generated in
+CI by `flutter create`, so a chat-written app with only `lib/` works. If the
+repo already has its own Flutter CI, pass `--workflows ios-preview` (or
+`preview`) rather than duplicating it.
 
 Lint: `pip install -q actionlint-py && actionlint .github/workflows/*.yml`.
 
@@ -92,6 +100,9 @@ to make it pass; if a test is wrong, say so explicitly.
     Actions), then saves the printed key as variable `APPETIZE_PUBLIC_KEY`. It
     runs on pushes to the default branch, or manually from the Actions tab.
     Without the token, the zipped simulator `.app` is attached to the run.
+  - Flutter: same Appetize secret; variables `APPETIZE_PUBLIC_KEY_IOS` /
+    `APPETIZE_PUBLIC_KEY_ANDROID`. The Android APK artifact also installs
+    directly on an Android phone.
   - iPhone: TestFlight via `ios-testflight.yml` — list the one-time
     prerequisites from the `generate-github-actions` skill (step 4).
 - Open a PR with `gh api repos/<o>/<r>/pulls -f title=... -f head=idp/connect -f base=<base> -F body=@body.md`.

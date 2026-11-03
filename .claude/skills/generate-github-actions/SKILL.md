@@ -22,8 +22,10 @@ template in mobile-idp so every app gets it.
 
 | Option | How to decide |
 |---|---|
-| `--type` | `pubspec.yaml` → `flutter`; an `*.xcodeproj` → `ios-native`. `.idp.env` records it after bootstrap. |
-| `--workflows` | ios-native: `ci` (always), `preview` (default on), `testflight` (only if the user wants signed builds **and** the IDP infra has GitHub OIDC — see step 4). flutter: `ci`. |
+| `--type` | `pubspec.yaml` (root, or a nested Flutter app) → `flutter`; an `*.xcodeproj` → `ios-native`. `.idp.env` records it after bootstrap. |
+| `--workflows` | ios-native: `ci` (always), `preview` (default on), `testflight` (only if the user wants signed builds **and** the IDP infra has GitHub OIDC — see step 4). flutter: `ci`, `preview` (Android APK, Linux), `ios-preview` (simulator, macOS); default picks previews from the `ios/` / `android/` folders present. |
+| `--app-dir` | flutter only. Detected: `.` if `./pubspec.yaml`, else the only Flutter-app pubspec outside `packages/`/`example/`. Pass it when there are several. |
+| `--org` | flutter only. Org for `flutter create` when a platform folder is missing in CI; default `com.example`. |
 | `--build-only` | Open `<proj>.xcodeproj/xcshareddata/xcschemes/<scheme>.xcscheme`. If `<TestAction>` has no `<TestableReference>`, pass `--build-only`, otherwise `xcodebuild test` fails with "not configured for the test action". |
 | `--default-branch` | `git symbolic-ref refs/remotes/origin/HEAD` or the GitHub API; default `main`. Previews run on pushes to it. |
 | `--runner`, `--xcode` | Defaults `macos-latest` / `latest-stable`. Pin only if the project needs a specific Xcode (e.g. `objectVersion = 77` needs Xcode 16+). |
@@ -56,6 +58,8 @@ actionlint .github/workflows/*.yml
 | `ios-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, repo variable `APPETIZE_PUBLIC_KEY`. Without them it still attaches the zipped simulator `.app`. | Tier 1. Runs on the default branch + manually. |
 | `ios-testflight.yml` | IDP infra with `github_actions_repositories = ["owner/repo"]` applied (Tier 3 gate — the **user** runs `make infra-apply`), a GitHub environment named like the IDP env with variable `AWS_ROLE_ARN`, Apple Team ID set in `fastlane/env.<env>`, an App Store Connect app record (`make create-app`, Tier 3), and populated `<env>/fastlane/credentials`. | Tier 2: consumes a build number forever. Manual trigger only. |
 | `flutter-ci.yml` | Nothing. Linux runner. | Tier 1. |
+| `flutter-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, variable `APPETIZE_PUBLIC_KEY_ANDROID`. Without it the debug APK is attached (installable on an Android phone). | Tier 1. Linux. Default branch + manual. |
+| `flutter-ios-preview.yml` | Optional secret `APPETIZE_API_TOKEN`; after first run, variable `APPETIZE_PUBLIC_KEY_IOS`. | Tier 1. macOS (10x on private repos). Default branch + manual. |
 
 ## Rules
 
