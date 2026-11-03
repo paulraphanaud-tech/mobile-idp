@@ -74,7 +74,10 @@ def build_ios(version, bump, latest_build_number, latest_version)
   update_ios_version(version, bump, latest_build_number, latest_version)
 
   flavor_arg = flavor ? " --flavor #{flavor}" : ""
-  sh("flutter build ios --release#{flavor_arg} --no-codesign#{dart_defines}")
+  # A bare `sh` runs from fastlane/, where flutter finds no pubspec.yaml.
+  in_project_root do
+    sh("flutter build ios --release#{flavor_arg} --no-codesign#{dart_defines}")
+  end
 
   # Take the export method from the flavor's own plist rather than assuming
   # app-store — dev/staging flavors export ad-hoc for Firebase distribution.
