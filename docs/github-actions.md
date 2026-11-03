@@ -11,7 +11,9 @@ to "compiled, tested and runnable" without anyone's own computer.
 |---|---|---|---|---|
 | `ios-ci.yml` | push, any branch; manual | macOS | nothing | 1 |
 | `ios-preview.yml` | push to default branch; manual | macOS | nothing | 1 |
-| `ios-testflight.yml` | manual only (`environment`, `bump` inputs) | macOS | GitHub OIDC infra (below), GitHub environment with `AWS_ROLE_ARN`, populated `<env>/fastlane/credentials`, app record | 2 |
+| `distribute.yml` (native) | manual only (`environment`, `destination` = testflight/firebase, `bump`) | macOS | GitHub environment secrets — or OIDC infra (below) | 2 |
+| `distribute.yml` (Flutter) | manual only (`android` = firebase/none, `ios` = testflight/firebase/none) | Linux + macOS | GitHub environment secrets | 2 |
+| `signing-setup.yml` | manual only | macOS (+ Linux for the Android key) | GitHub environment secrets | 2 |
 | `flutter-ci.yml` | push, any branch; manual | Linux | nothing | 1 |
 | `flutter-preview.yml` | push to default branch; manual | Linux | nothing | 1 |
 | `flutter-ios-preview.yml` | push to default branch; manual | macOS | nothing | 1 |
@@ -35,7 +37,8 @@ Design choices worth keeping:
 `ios-preview.yml` builds an unsigned Debug simulator `.app`, zips it and
 attaches it to the run. No secrets, no Apple account, no third-party service.
 Install it on any Mac with `xcrun simctl install booted <App>.app`; to put the
-app on a real iPhone, use `ios-testflight.yml`.
+app on a real iPhone, use `distribute.yml` (TestFlight or Firebase) — see
+**`docs/github-distribution.md`** for the whole no-computer setup.
 
 ### Flutter previews
 
@@ -61,12 +64,25 @@ directory is detected (the only Flutter-app `pubspec.yaml` outside
 it. `flutter-ci.yml` skips `flutter test` when there is no `test/*_test.dart`
 rather than failing.
 
-## TestFlight without static credentials
+## Distribution: GitHub secrets or AWS
 
-`ios-testflight.yml` assumes an AWS role through GitHub OIDC, reads
-`<env>/fastlane/credentials` with `aws-secretsmanager-get-secrets`, checks out
-mobile-idp into `.idp/`, and runs `fastlane ios deploy_testflight` (match
-readonly → archive → upload, internal testers).
+`distribute.yml` and `signing-setup.yml` read credentials from **GitHub
+environment secrets** by default — no AWS account, nothing to run on a
+computer. That path, the secrets it needs and the one-time signing setup are
+in **`docs/github-distribution.md`**. Certificates live in a private git
+repository (`SIGNING_REPO`) with Match's git storage; the Android upload key is
+kept, encrypted, in the same repository (`scripts/android-signing.sh`).
+
+`ios-testflight.yml` from earlier versions is replaced by `distribute.yml`;
+`--workflows testflight` still renders it.
+
+## TestFlight without static credentials (AWS mode)
+
+When the GitHub environment has an `AWS_ROLE_ARN` variable, the iOS job of
+`distribute.yml` instead assumes that AWS role through GitHub OIDC, reads
+`<env>/fastlane/credentials` with `aws-secretsmanager-get-secrets`, and leaves
+Match storage to `fastlane/env.<env>` (S3 or git) — the same setup as a
+CodeBuild stack. Android distribution always uses the GitHub secrets.
 
 Infra (in the IDP stack of that environment):
 
