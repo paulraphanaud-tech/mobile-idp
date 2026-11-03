@@ -60,18 +60,7 @@ CODE_SIGN_IDENTITY_FOR_EXPORT_METHOD = {
   "development" => "Apple Development",
 }.freeze
 
-# Walks up to the directory holding pubspec.yaml. Needed because fastlane's
-# working directory is not consistent: real actions (gym, etc.) run from the
-# project root, but a bare `sh` runs from fastlane/, so a single relative
-# path cannot work for both.
-def flutter_project_root
-  dir = Dir.pwd
-  until dir == "/"
-    return dir if File.exist?(File.join(dir, "pubspec.yaml"))
-    dir = File.dirname(dir)
-  end
-  UI.user_error!("Could not find the Flutter project root (no pubspec.yaml at or above #{Dir.pwd})")
-end
+# flutter_project_root comes from the common module.
 
 def build_ios(version, bump, latest_build_number, latest_version)
   flavor = ios_flavor

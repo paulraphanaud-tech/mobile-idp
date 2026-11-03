@@ -5,8 +5,24 @@
 
 require 'shellwords'
 
+# Walks up from the working directory to the folder holding pubspec.yaml.
+# fastlane's working directory is not consistent: real actions (gym, etc.) run
+# from the project root, but a bare `sh` runs from fastlane/, so a single
+# relative path cannot work for both. Searching from Dir.pwd also works
+# whatever the modules' location: a path relative to this file (as before)
+# reached the project root only when modules/ was copied in, and ci-cd/ when
+# it is a git submodule at ci-cd/.
+def flutter_project_root
+  dir = Dir.pwd
+  until dir == "/"
+    return dir if File.exist?(File.join(dir, "pubspec.yaml"))
+    dir = File.dirname(dir)
+  end
+  UI.user_error!("Could not find the Flutter project root (no pubspec.yaml at or above #{Dir.pwd})")
+end
+
 def in_project_root(&block)
-  Dir.chdir(File.expand_path("../../..", __dir__), &block)
+  Dir.chdir(flutter_project_root, &block)
 end
 
 def prepare_and_check
