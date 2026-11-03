@@ -34,9 +34,11 @@ IDP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TPL="$IDP_ROOT/templates/github"
 
 # Action versions in one place; dependabot keeps generated files current after.
+# All Node 24 majors: GitHub now forces Node 20 actions onto Node 24, and
+# configure-aws-credentials v4/v5 can hang at OIDC role assumption under it.
 CHECKOUT_VERSION="v6"
-UPLOAD_ARTIFACT_VERSION="v4"
-AWS_CREDENTIALS_VERSION="v4"
+UPLOAD_ARTIFACT_VERSION="v6"
+AWS_CREDENTIALS_VERSION="v6"
 
 TYPE="" WORKFLOWS="" RUNNER="macos-latest" XCODE_VERSION="latest-stable" TIMEOUT="30" DEPLOY_TIMEOUT="45"
 DEFAULT_BRANCH="main" BUILD_ONLY=0 OUT=".github/workflows" FORCE=0 DRY_RUN=0
