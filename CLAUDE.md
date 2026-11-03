@@ -447,6 +447,20 @@ which is why `create_app` is a developer-machine action, not a CI one.
   when `CI` or `CODEBUILD_BUILD_ID` is set.
 - Selected by `FASTLANE_ENV`, which the Makefile sets from `ENV`.
 
+### Projects without flavors, single-platform projects
+
+- **No flavors.** Leave `FLAVOR` (and `SCHEME`) empty in `fastlane/env.<env>`.
+  `build_ios` then runs `flutter build ios --release` without `--flavor`, uses
+  the plain `Release` configuration, scheme `Runner` and
+  `ios/export_options.plist`, and writes `build/ios/ipa/app-release.ipa`
+  (`ios_ipa_path`). `update_code_signing_settings` sets the bundle ID on
+  `Release`, so Flutter's placeholder ID cannot leak into the IPA.
+  The Android modules still assume a flavor.
+- **One platform.** The `firebase` Terraform module skips the Android app when
+  `android_package_name = ""` and the iOS app when `ios_bundle_id = ""`. Its
+  outputs are then `null`. `moved` blocks keep existing projects' apps at
+  their old state addresses, so upgrading the module plans no replacement.
+
 ### Versioning
 
 Semantic `major.minor.patch` with the build number fetched from Firebase App

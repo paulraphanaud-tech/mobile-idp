@@ -7,11 +7,10 @@
 #   APP_STORE_CONNECT_API_KEY_KEY_ID, APP_STORE_CONNECT_API_KEY_ISSUER_ID,
 #   APP_STORE_CONNECT_API_KEY_KEY (auth established in Fastfile before_all)
 #   APP_IDENTIFIER
-#   FLAVOR
+#   FLAVOR (optional — see ios_build)
 # =============================================================================
 
 def deploy_ios_to_app_store_connect(version, bump)
-  flavor = ENV['FLAVOR']
   tester_group = ENV['APP_STORE_TESTER_GROUP']
   app_identifier = ENV['APP_IDENTIFIER']
 
@@ -30,7 +29,7 @@ def deploy_ios_to_app_store_connect(version, bump)
   build_ios(version, bump, latest_build_number, latest_version)
 
   upload_to_testflight(
-    ipa: "build/ios/ipa/app-#{flavor}-release.ipa",
+    ipa: ios_ipa_path,
     skip_waiting_for_build_processing: true,
     notify_external_testers: false,
     distribute_external: true,

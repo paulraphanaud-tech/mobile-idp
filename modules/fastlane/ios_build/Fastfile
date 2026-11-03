@@ -1,8 +1,26 @@
 # =============================================================================
 # Module: iOS Build
-# Provides: update_ios_version, build_ios(version, bump, latest_build_number, latest_version)
+# Provides: update_ios_version, build_ios(version, bump, latest_build_number, latest_version),
+#           ios_ipa_path
 # Requires: common module (prepare_and_check, compute_next_version)
+#
+# Flavors are optional. With FLAVOR set, the build uses --flavor <flavor>, the
+# Release-<flavor> configuration, scheme SCHEME (or the flavor name) and
+# ios/export_options_<flavor>.plist. With FLAVOR unset or empty — a project
+# with no environments yet — it uses the plain Release configuration, scheme
+# SCHEME (or Runner) and ios/export_options.plist.
 # =============================================================================
+
+def ios_flavor
+  flavor = ENV['FLAVOR'].to_s.strip
+  flavor.empty? ? nil : flavor
+end
+
+# Where gym writes the IPA, and where the deploy modules read it from.
+def ios_ipa_path
+  name = ios_flavor ? "app-#{ios_flavor}-release.ipa" : "app-release.ipa"
+  "build/ios/ipa/#{name}"
+end
 
 def update_ios_version(version, bump, latest_build_number, latest_version)
   build_version, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
@@ -56,20 +74,24 @@ def flutter_project_root
 end
 
 def build_ios(version, bump, latest_build_number, latest_version)
-  flavor = ENV['FLAVOR']
-  scheme = ENV['SCHEME']
+  flavor = ios_flavor
+  scheme = ENV['SCHEME'].to_s.strip
+  scheme = flavor || "Runner" if scheme.empty?
+  configuration = flavor ? "Release-#{flavor}" : "Release"
   app_identifier = ENV['APP_IDENTIFIER']
   team_id = ENV['APPLE_TEAM_ID']
 
   prepare_and_check
   update_ios_version(version, bump, latest_build_number, latest_version)
 
-  sh("flutter build ios --release --flavor #{flavor} --no-codesign#{dart_defines}")
+  flavor_arg = flavor ? " --flavor #{flavor}" : ""
+  sh("flutter build ios --release#{flavor_arg} --no-codesign#{dart_defines}")
 
   # Take the export method from the flavor's own plist rather than assuming
   # app-store — dev/staging flavors export ad-hoc for Firebase distribution.
   # Absolute path so it resolves the same from any fastlane working directory.
-  export_options = File.join(flutter_project_root, "ios", "export_options_#{flavor}.plist")
+  plist_name = flavor ? "export_options_#{flavor}.plist" : "export_options.plist"
+  export_options = File.join(flutter_project_root, "ios", plist_name)
   UI.user_error!("Missing export options plist: #{export_options}") unless File.exist?(export_options)
 
   export_method = sh(
@@ -89,7 +111,7 @@ def build_ios(version, bump, latest_build_number, latest_version)
     path: "./ios/Runner.xcodeproj",
     use_automatic_signing: false,
     targets: ["Runner"],
-    build_configurations: ["Release-#{flavor}"],
+    build_configurations: [configuration],
     team_id: team_id,
     code_sign_identity: CODE_SIGN_IDENTITY_FOR_EXPORT_METHOD[export_method],
     profile_name: profile_name,
@@ -98,15 +120,16 @@ def build_ios(version, bump, latest_build_number, latest_version)
 
   gym(
     workspace: "./ios/Runner.xcworkspace",
-    # Must be the flavor's own build configuration. The base "Release" config
-    # keeps Flutter's placeholder PRODUCT_BUNDLE_IDENTIFIER (com.example.*),
-    # so archiving with it silently produces an IPA with the wrong bundle ID
-    # and no matching provisioning profile.
-    configuration: "Release-#{flavor}",
+    # With flavors this must be the flavor's own build configuration. The base
+    # "Release" config keeps Flutter's placeholder PRODUCT_BUNDLE_IDENTIFIER
+    # (com.example.*), so archiving with it silently produces an IPA with the
+    # wrong bundle ID. Without flavors, "Release" is the only configuration,
+    # and update_code_signing_settings above has just set its bundle ID.
+    configuration: configuration,
     scheme: scheme,
     export_method: export_method,
     export_options: export_options,
-    output_name: "app-#{flavor}-release.ipa",
+    output_name: File.basename(ios_ipa_path),
     output_directory: "./build/ios/ipa",
   )
 
