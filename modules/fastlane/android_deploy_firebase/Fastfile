@@ -13,7 +13,7 @@
 
 def deploy_android_to_app_distrib(version, bump)
   firebase_android = ENV['FIREBASE_APP_ANDROID']
-  UI.user_error!("FIREBASE_APP_ANDROID is not set (Firebase console → Project settings → your Android app → App ID)") if firebase_android.to_s.strip.empty?
+  UI.user_error!("FIREBASE_APP_ANDROID is not set (Firebase console > Project settings > your Android app > App ID)") if firebase_android.to_s.strip.empty?
   flavor = android_flavor('dev')
 
   ENV['BUILD_FORMAT'] = 'apk'

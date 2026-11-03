@@ -87,12 +87,13 @@ fail() { echo "[generate-github-actions] ERROR: $*" >&2; exit 1; }
 
 # Values recorded by bootstrap-ios-native.sh, if present.
 SCHEME="" XCODE_PROJECT="" XCODE_WORKSPACE="" IDP_REPO="paulraphanaud-tech/mobile-idp" IDP_REF="main"
-AWS_REGION="eu-west-1" GITHUB_REPO="OWNER/REPO" IDP_PROJECT_TYPE="" ORG="" PROJECT_NAME="" SIGNING_KEY_ID=""
+AWS_REGION="eu-west-1" GITHUB_REPO="OWNER/REPO" IDP_PROJECT_TYPE="" IDP_APP_DIR="" ORG="" PROJECT_NAME="" SIGNING_KEY_ID=""
 if [ -f .idp.env ]; then
   # shellcheck disable=SC1091
   set -a; . ./.idp.env; set +a
 fi
 ORG="${ARG_ORG:-${ORG:-com.example}}"
+APP_DIR="${APP_DIR:-${IDP_APP_DIR:-}}"
 SIGNING_KEY_ID="${ARG_SIGNING_KEY_ID:-${SIGNING_KEY_ID:-${PROJECT_NAME:-$(basename "$(pwd)" | tr '[:upper:]_ ' '[:lower:]--')}}}"
 SCHEME="${ARG_SCHEME:-$SCHEME}"
 XCODE_PROJECT="${ARG_PROJECT:-$XCODE_PROJECT}"

@@ -211,7 +211,7 @@ end
 # from the latest Firebase release.
 def deploy_ios_native_to_firebase(version, bump)
   firebase_ios = ENV['FIREBASE_APP_IOS']
-  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console → Project settings → your iOS app → App ID)") if firebase_ios.to_s.strip.empty?
+  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console > Project settings > your iOS app > App ID)") if firebase_ios.to_s.strip.empty?
   auth = firebase_auth_options
 
   latest_release = firebase_app_distribution_get_latest_release(app: firebase_ios, **auth) || {}

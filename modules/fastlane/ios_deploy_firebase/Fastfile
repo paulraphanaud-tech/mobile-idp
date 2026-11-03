@@ -18,7 +18,7 @@
 
 def deploy_ios_to_app_distrib(version, bump)
   firebase_ios = ENV['FIREBASE_APP_IOS']
-  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console → Project settings → your iOS app → App ID)") if firebase_ios.to_s.strip.empty?
+  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console > Project settings > your iOS app > App ID)") if firebase_ios.to_s.strip.empty?
   auth = firebase_auth_options
 
   # nil until the first release exists, so the very first deploy of a new

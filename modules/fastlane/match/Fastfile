@@ -219,9 +219,9 @@ def setup_signing(types, devices)
   app_identifier = ENV['APP_IDENTIFIER'].to_s.strip
   team_id = ENV['APPLE_TEAM_ID'].to_s.strip
   UI.user_error!("APP_IDENTIFIER is not set in fastlane/env.<env>") if app_identifier.empty?
-  UI.user_error!("APPLE_TEAM_ID is not set in fastlane/env.<env> (developer.apple.com → Membership details)") if team_id.empty? || team_id == 'TEAMID_TBD'
+  UI.user_error!("APPLE_TEAM_ID is not set in fastlane/env.<env> (developer.apple.com > Membership details)") if team_id.empty? || team_id == 'TEAMID_TBD'
   unless lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]
-    UI.user_error!("No App Store Connect API key — set APP_STORE_CONNECT_API_KEY_KEY_ID / _ISSUER_ID / _KEY")
+    UI.user_error!("No App Store Connect API key: set APP_STORE_CONNECT_API_KEY_KEY_ID / _ISSUER_ID / _KEY")
   end
 
   if respond_to?(:register_bundle_id_with_api_key, true)

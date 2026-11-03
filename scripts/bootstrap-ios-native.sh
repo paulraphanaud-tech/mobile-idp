@@ -24,8 +24,12 @@ set -euo pipefail
 #   --github-repo O/R       default: from `git remote get-url origin`
 #   --idp-repo O/R          default: paulraphanaud-tech/mobile-idp
 #   --idp-ref REF           branch or tag CI checks out; default: main
+#   --firebase-ios-app ID   Firebase iOS app ID (1:123:ios:abc); default: empty,
+#                           fill in fastlane/env.dev before a Firebase build
+#   --tester-groups LIST    Firebase tester group aliases; default: testers
 #   --no-workflows          skip scripts/generate-github-actions.sh
-#   --workflows LIST        passed to the generator (default: ci,preview)
+#   --workflows LIST        passed to the generator
+#                           (default: ci,preview,distribute,signing)
 #   --force                 overwrite files that already exist
 #   --dry-run               print what would be written, write nothing
 #
@@ -40,7 +44,8 @@ PROJECT_DIR="$(pwd)"
 
 PROJECT_NAME="" XCODE_PROJECT="" XCODE_WORKSPACE="" SCHEME="" IOS_BUNDLE_ID="" APPLE_TEAM_ID=""
 AWS_REGION="eu-west-1" GITHUB_REPO="" IDP_REPO="paulraphanaud-tech/mobile-idp" IDP_REF="main"
-WITH_WORKFLOWS=1 WORKFLOWS="ci,preview" FORCE=0 DRY_RUN=0
+WITH_WORKFLOWS=1 WORKFLOWS="ci,preview,distribute,signing" FORCE=0 DRY_RUN=0
+FIREBASE_APP_IOS="" FIREBASE_TESTER_GROUPS="testers"
 MODULES_ROOT=".idp"
 
 while [ $# -gt 0 ]; do
@@ -55,11 +60,13 @@ while [ $# -gt 0 ]; do
     --github-repo)  GITHUB_REPO="$2"; shift 2 ;;
     --idp-repo)     IDP_REPO="$2"; shift 2 ;;
     --idp-ref)      IDP_REF="$2"; shift 2 ;;
+    --firebase-ios-app) FIREBASE_APP_IOS="$2"; shift 2 ;;
+    --tester-groups) FIREBASE_TESTER_GROUPS="$2"; shift 2 ;;
     --no-workflows) WITH_WORKFLOWS=0; shift ;;
     --workflows)    WORKFLOWS="$2"; shift 2 ;;
     --force)        FORCE=1; shift ;;
     --dry-run)      DRY_RUN=1; shift ;;
-    -h|--help)      sed -n '3,35p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '3,39p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -150,6 +157,8 @@ render() {
     -e "s|{{IDP_REF}}|$(esc "$IDP_REF")|g" \
     -e "s|{{MODULES_ROOT}}|$(esc "$MODULES_ROOT")|g" \
     -e "s|{{MODULES_PATH}}|$(esc "$MODULES_PATH")|g" \
+    -e "s|{{FIREBASE_APP_IOS}}|$(esc "$FIREBASE_APP_IOS")|g" \
+    -e "s|{{FIREBASE_TESTER_GROUPS}}|$(esc "$FIREBASE_TESTER_GROUPS")|g" \
     "$src" > "$dest"
   log "write  $dest"
 }
@@ -157,6 +166,7 @@ render() {
 render "$TEMPLATES_DIR/fastlane/Fastfile"           "fastlane/Fastfile"
 render "$TEMPLATES_DIR/fastlane/env.dev"            "fastlane/env.dev"
 render "$TEMPLATES_DIR/fastlane/env.secret.example" "fastlane/env.secret.example"
+render "$TEMPLATES_DIR/fastlane/Pluginfile"         "fastlane/Pluginfile"
 render "$TEMPLATES_DIR/Gemfile"                     "Gemfile"
 render "$TEMPLATES_DIR/Makefile"                    "Makefile"
 
@@ -194,3 +204,4 @@ if [ "$WITH_WORKFLOWS" -eq 1 ]; then
 fi
 
 log "done. Next: commit, push, and watch the 'iOS CI' workflow on GitHub."
+log "To install on an iPhone: docs/github-distribution.md (secrets, then 'Signing setup', then 'Distribute to testers')."
