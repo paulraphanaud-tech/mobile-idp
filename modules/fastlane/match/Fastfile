@@ -1,6 +1,7 @@
 # =============================================================================
 # Module: Match
-# Provides: sync_certificates(cert_type, readonly)
+# Provides: sync_certificates(cert_type, readonly, extra = {}),
+#           setup_signing(types, devices)
 #
 # Fastlane Match with a choice of storage backend, selected by
 # MATCH_STORAGE_MODE:
@@ -44,7 +45,7 @@ def match_storage_mode
   mode
 end
 
-def sync_certificates(cert_type, readonly)
+def sync_certificates(cert_type, readonly, extra = {})
   mode = match_storage_mode
 
   options = {
@@ -60,7 +61,7 @@ def sync_certificates(cert_type, readonly)
   when 'git' then options.merge!(match_git_options(options[:readonly]))
   end
 
-  match(options)
+  match(options.merge(extra))
 
   UI.message("Certificates synced (type: #{options[:type]}, storage: #{mode})!")
 end
@@ -181,5 +182,61 @@ def match_git_host(git_url)
     [m[1], m[2]]
   elsif (m = git_url.match(/\A[^@]+@([^:]+):/))
     [m[1], nil]
+  end
+end
+
+# -----------------------------------------------------------------------------
+# One-time signing setup (Tier 2 — creates Apple certificates and profiles)
+#
+# What a Mac user would do once with `fastlane match appstore` / `adhoc`, done
+# from a GitHub-hosted macOS runner instead, so nobody needs their own Mac:
+#
+#   1. register the bundle ID (App Store Connect API key; idempotent)
+#   2. register tester devices for ad-hoc builds (idempotent)
+#   3. match <type> with readonly:false for each type — creates the
+#      distribution certificate and profile if storage has none, otherwise
+#      just syncs; adhoc also regenerates the profile when devices were added
+#
+# Never called by a build. Builds stay readonly:true.
+#
+#   types    "appstore,adhoc" (default) — appstore for TestFlight, adhoc for
+#            Firebase App Distribution
+#   devices  "iPhone Paul=00008110-001A2B3C4D5E6F70; iPad=…" — name=UDID pairs,
+#            separated by ';', ',' or newlines. Optional.
+# -----------------------------------------------------------------------------
+def setup_signing(types, devices)
+  app_identifier = ENV['APP_IDENTIFIER'].to_s.strip
+  team_id = ENV['APPLE_TEAM_ID'].to_s.strip
+  UI.user_error!("APP_IDENTIFIER is not set in fastlane/env.<env>") if app_identifier.empty?
+  UI.user_error!("APPLE_TEAM_ID is not set in fastlane/env.<env> (developer.apple.com → Membership details)") if team_id.empty? || team_id == 'TEAMID_TBD'
+  unless lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]
+    UI.user_error!("No App Store Connect API key — set APP_STORE_CONNECT_API_KEY_KEY_ID / _ISSUER_ID / _KEY")
+  end
+
+  if respond_to?(:register_bundle_id_with_api_key, true)
+    register_bundle_id_with_api_key(app_identifier, ENV['APP_NAME'] || app_identifier, team_id)
+  end
+
+  parsed = parse_devices(devices)
+  unless parsed.empty?
+    register_devices(devices: parsed, team_id: team_id, platform: "ios")
+    UI.success("Registered #{parsed.size} device(s): #{parsed.keys.join(', ')}")
+  end
+
+  list = (types.to_s.strip.empty? ? "appstore,adhoc" : types).split(',').map(&:strip).reject(&:empty?)
+  list.each do |type|
+    extra = type == 'adhoc' ? { force_for_new_devices: true } : {}
+    sync_certificates(type, false, extra)
+  end
+
+  UI.success("Signing ready for #{app_identifier}: #{list.join(', ')}")
+end
+
+def parse_devices(devices)
+  devices.to_s.split(/[;,\n]/).map(&:strip).reject(&:empty?).each_with_object({}) do |pair, h|
+    name, udid = pair.split('=', 2).map { |v| v.to_s.strip }
+    UI.user_error!("Device '#{pair}' is not name=UDID") if name.to_s.empty? || udid.to_s.empty?
+    UI.user_error!("'#{udid}' does not look like a UDID") unless udid.match?(/\A[0-9A-Fa-f-]{24,40}\z/)
+    h[name] = udid
   end
 end

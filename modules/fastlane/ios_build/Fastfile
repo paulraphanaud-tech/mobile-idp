@@ -1,7 +1,7 @@
 # =============================================================================
 # Module: iOS Build
-# Provides: update_ios_version, build_ios(version, bump, latest_build_number, latest_version),
-#           ios_ipa_path
+# Provides: update_ios_version, build_ios(version, bump, latest_build_number, latest_version,
+#           default_export_method:), ios_ipa_path
 # Requires: common module (prepare_and_check, compute_next_version)
 #
 # Flavors are optional. With FLAVOR set, the build uses --flavor <flavor>, the
@@ -9,6 +9,12 @@
 # ios/export_options_<flavor>.plist. With FLAVOR unset or empty — a project
 # with no environments yet — it uses the plain Release configuration, scheme
 # SCHEME (or Runner) and ios/export_options.plist.
+#
+# The export options plist is optional too. An app written in a chat often has
+# no ios/ folder at all — CI generates it with `flutter create` — so there is
+# no plist to read. The export method then comes from EXPORT_METHOD, else the
+# caller's default (app-store for TestFlight, ad-hoc for Firebase), and the
+# export options are built from it.
 # =============================================================================
 
 def ios_flavor
@@ -36,6 +42,7 @@ def update_ios_version(version, bump, latest_build_number, latest_version)
   )
 
   UI.message("Version updated => #{build_version}(#{build_number})!")
+  [build_version, build_number]
 end
 
 require 'shellwords'
@@ -47,6 +54,14 @@ MATCH_TYPE_FOR_EXPORT_METHOD = {
   "ad-hoc"      => "AdHoc",
   "development" => "Development",
   "enterprise"  => "InHouse",
+}.freeze
+
+# The `match` type (what `fastlane match <type>` takes) for each export method.
+MATCH_SYNC_TYPE_FOR_EXPORT_METHOD = {
+  "app-store"   => "appstore",
+  "ad-hoc"      => "adhoc",
+  "development" => "development",
+  "enterprise"  => "enterprise",
 }.freeze
 
 # The signing identity each export method's profile expects. An App Store or
@@ -62,7 +77,7 @@ CODE_SIGN_IDENTITY_FOR_EXPORT_METHOD = {
 
 # flutter_project_root comes from the common module.
 
-def build_ios(version, bump, latest_build_number, latest_version)
+def build_ios(version, bump, latest_build_number, latest_version, default_export_method: "app-store")
   flavor = ios_flavor
   scheme = ENV['SCHEME'].to_s.strip
   scheme = flavor || "Runner" if scheme.empty?
@@ -71,29 +86,55 @@ def build_ios(version, bump, latest_build_number, latest_version)
   team_id = ENV['APPLE_TEAM_ID']
 
   prepare_and_check
-  update_ios_version(version, bump, latest_build_number, latest_version)
+  build_version, build_number = update_ios_version(version, bump, latest_build_number, latest_version)
 
   flavor_arg = flavor ? " --flavor #{flavor}" : ""
+  # --build-name/--build-number as well as the agvtool edit above: Flutter's
+  # Info.plist reads $(FLUTTER_BUILD_NAME)/$(FLUTTER_BUILD_NUMBER), which come
+  # from pubspec.yaml unless given here.
+  version_args = " --build-name=#{build_version} --build-number=#{build_number}"
   # A bare `sh` runs from fastlane/, where flutter finds no pubspec.yaml.
   in_project_root do
-    sh("flutter build ios --release#{flavor_arg} --no-codesign#{dart_defines}")
+    sh("flutter build ios --release#{flavor_arg}#{version_args} --no-codesign#{dart_defines}")
   end
 
   # Take the export method from the flavor's own plist rather than assuming
   # app-store — dev/staging flavors export ad-hoc for Firebase distribution.
   # Absolute path so it resolves the same from any fastlane working directory.
   plist_name = flavor ? "export_options_#{flavor}.plist" : "export_options.plist"
-  export_options = File.join(flutter_project_root, "ios", plist_name)
-  UI.user_error!("Missing export options plist: #{export_options}") unless File.exist?(export_options)
+  plist_path = File.join(flutter_project_root, "ios", plist_name)
 
-  export_method = sh(
-    "/usr/libexec/PlistBuddy -c 'Print :method' #{export_options.shellescape}",
-    log: false
-  ).strip
+  if File.exist?(plist_path)
+    export_method = sh(
+      "/usr/libexec/PlistBuddy -c 'Print :method' #{plist_path.shellescape}",
+      log: false
+    ).strip
+    source = plist_path
+  else
+    export_method = ENV['EXPORT_METHOD'].to_s.strip
+    export_method = default_export_method if export_method.empty?
+    source = "EXPORT_METHOD / default (no #{plist_name})"
+  end
 
   match_type = MATCH_TYPE_FOR_EXPORT_METHOD[export_method]
-  UI.user_error!("Unsupported export method '#{export_method}' in #{export_options}") if match_type.nil?
+  UI.user_error!("Unsupported export method '#{export_method}' from #{source}") if match_type.nil?
   profile_name = "match #{match_type} #{app_identifier}"
+
+  export_options = if File.exist?(plist_path)
+    plist_path
+  else
+    {
+      method: export_method,
+      teamID: team_id,
+      signingStyle: "manual",
+      provisioningProfiles: { app_identifier => profile_name },
+    }
+  end
+
+  # Read-only, always: a build must never create or revoke a certificate.
+  # CodeBuild stacks sync in the buildspec before fastlane runs; GitHub Actions
+  # runners start empty, so the profile has to be fetched here.
+  sync_certificates(MATCH_SYNC_TYPE_FOR_EXPORT_METHOD[export_method], true) if ENV['IDP_SYNC_SIGNING'] == 'true'
 
   # Scope manual signing to the Runner target's own configuration. Passing
   # these through gym's xcargs instead would apply them to every target in

@@ -8,6 +8,18 @@
 #   APP_STORE_CONNECT_API_KEY_KEY (auth established in Fastfile before_all)
 #   APP_IDENTIFIER
 #   FLAVOR (optional — see ios_build)
+#
+# Optional ENV:
+#   APP_STORE_TESTER_GROUP          TestFlight group(s), comma-separated
+#   TESTFLIGHT_DISTRIBUTE_EXTERNAL  "true" (default, unchanged behaviour) sends
+#                                   the build to external groups, which goes
+#                                   through Beta App Review. "false" keeps it to
+#                                   internal testers: installable minutes after
+#                                   processing, no review.
+#   USES_NON_EXEMPT_ENCRYPTION      "true" (default) or "false". Answers the
+#                                   export compliance question for the build.
+#                                   An app that only uses HTTPS / the OS's own
+#                                   crypto is exempt ("false"); check yours.
 # =============================================================================
 
 def deploy_ios_to_app_store_connect(version, bump)
@@ -28,14 +40,18 @@ def deploy_ios_to_app_store_connect(version, bump)
 
   build_ios(version, bump, latest_build_number, latest_version)
 
+  external = ENV.fetch('TESTFLIGHT_DISTRIBUTE_EXTERNAL', 'true').strip.downcase != 'false'
+  encryption = ENV.fetch('USES_NON_EXEMPT_ENCRYPTION', 'true').strip.downcase != 'false'
+  groups = tester_group.to_s.split(',').map(&:strip).reject(&:empty?)
+
   upload_to_testflight(
     ipa: ios_ipa_path,
     skip_waiting_for_build_processing: true,
     notify_external_testers: false,
-    distribute_external: true,
+    distribute_external: external,
     changelog: ENV['RELEASE_NOTES'] || "No changelog",
-    uses_non_exempt_encryption: true,
-    groups: tester_group
+    uses_non_exempt_encryption: encryption,
+    groups: groups.empty? ? nil : groups
   )
 
   UI.message("Successfully deployed IPA on App Store Connect!")

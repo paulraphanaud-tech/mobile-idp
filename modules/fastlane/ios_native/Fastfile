@@ -2,9 +2,10 @@
 # Module: iOS Native (Xcode / SwiftUI / UIKit — no Flutter)
 # Provides: ios_native_root, ios_native_container_args, ios_native_ipa_path,
 #           test_ios_native, build_ios_native_simulator,
-#           build_ios_native(version, bump, latest_build_number, latest_version),
-#           deploy_ios_native_to_testflight(version, bump)
-# Requires: common module (compute_next_version)
+#           build_ios_native(version, bump, latest_build_number, latest_version, export_method:),
+#           deploy_ios_native_to_testflight(version, bump),
+#           deploy_ios_native_to_firebase(version, bump)
+# Requires: common module (compute_next_version, firebase_auth_options, env_list)
 #           match module (sync_certificates) for signed builds
 #
 # The Flutter ios_build module assumes ios/Runner.xcworkspace and runs
@@ -17,7 +18,9 @@
 #   SCHEME            shared scheme to build (defaults to the project name)
 #   APP_TARGET        target whose signing is configured (defaults to SCHEME)
 #   CONFIGURATION     build configuration for archives (default Release)
-#   EXPORT_METHOD     app-store | ad-hoc | development | enterprise (default app-store)
+#   EXPORT_METHOD     app-store | ad-hoc | development | enterprise (default app-store;
+#                     the Firebase lane uses FIREBASE_EXPORT_METHOD, default ad-hoc)
+#   FIREBASE_APP_IOS  Firebase iOS app ID, for deploy_ios_native_to_firebase
 #   SIMULATOR_DEVICE  e.g. "iPhone 16" (default: first available iPhone)
 # =============================================================================
 
@@ -131,13 +134,14 @@ MATCH_TYPE_FOR_NATIVE_EXPORT = {
 # settings rather than written into the project: modern Xcode projects use
 # GENERATE_INFOPLIST_FILE with MARKETING_VERSION / CURRENT_PROJECT_VERSION,
 # where agvtool-based increment_version_number edits nothing useful.
-def build_ios_native(version, bump, latest_build_number, latest_version)
+def build_ios_native(version, bump, latest_build_number, latest_version, export_method: nil)
   app_identifier = ENV['APP_IDENTIFIER']
   team_id = ENV['APPLE_TEAM_ID']
   UI.user_error!("APP_IDENTIFIER is required for a signed build") if app_identifier.to_s.empty?
   UI.user_error!("APPLE_TEAM_ID is required for a signed build") if team_id.to_s.empty?
 
-  export_method = (ENV['EXPORT_METHOD'] || "app-store").strip
+  export_method ||= ENV['EXPORT_METHOD'].to_s.strip
+  export_method = "app-store" if export_method.empty?
   match_type, profile_kind = MATCH_TYPE_FOR_NATIVE_EXPORT[export_method]
   UI.user_error!("Unsupported EXPORT_METHOD '#{export_method}'") if match_type.nil?
 
@@ -199,4 +203,32 @@ def deploy_ios_native_to_testflight(version, bump)
   )
 
   UI.success("Uploaded #{ios_native_scheme} to TestFlight")
+end
+
+# Ad-hoc build → Firebase App Distribution. Every tester's device must be
+# registered on the Apple Developer account and in the ad-hoc profile — the
+# signing-setup workflow's `devices` input does both. Build numbers continue
+# from the latest Firebase release.
+def deploy_ios_native_to_firebase(version, bump)
+  firebase_ios = ENV['FIREBASE_APP_IOS']
+  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console → Project settings → your iOS app → App ID)") if firebase_ios.to_s.strip.empty?
+  auth = firebase_auth_options
+
+  latest_release = firebase_app_distribution_get_latest_release(app: firebase_ios, **auth) || {}
+  export_method = ENV['FIREBASE_EXPORT_METHOD'].to_s.strip
+  export_method = "ad-hoc" if export_method.empty?
+
+  build_ios_native(version, bump, latest_release[:buildVersion].to_i, latest_release[:displayVersion],
+                   export_method: export_method)
+
+  firebase_app_distribution(
+    app: firebase_ios,
+    ipa_path: ios_native_ipa_path,
+    groups: env_list('FIREBASE_TESTER_GROUPS'),
+    testers: env_list('FIREBASE_TESTERS'),
+    release_notes: ENV['RELEASE_NOTES'],
+    **auth
+  )
+
+  UI.success("Uploaded #{ios_native_scheme} to Firebase App Distribution")
 end

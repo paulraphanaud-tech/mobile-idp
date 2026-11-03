@@ -1,30 +1,41 @@
 # =============================================================================
 # Module: iOS Deploy Firebase
 # Provides: deploy_ios_to_app_distrib(version, bump)
-# Requires: ios_build module (build_ios)
+# Requires: common module (firebase_auth_options, env_list)
+#           ios_build module (build_ios)
+#
+# ENV:
+#   FIREBASE_APP_IOS        Firebase iOS app ID (1:123:ios:abc)
+#   FIREBASE_TESTER_GROUPS  optional, comma-separated group *aliases*
+#   FIREBASE_TESTERS        optional, comma-separated tester emails
+#   plus Firebase credentials — see firebase_auth_options (common)
+#
+# Firebase App Distribution installs an ad-hoc build, so the device of every
+# tester must be registered on the Apple Developer account and included in the
+# ad-hoc profile. Without an export options plist the build defaults to
+# ad-hoc; with one, its `method` decides.
 # =============================================================================
 
 def deploy_ios_to_app_distrib(version, bump)
   firebase_ios = ENV['FIREBASE_APP_IOS']
-  firebase_cli_token = ENV['FIREBASE_CLI_TOKEN']
+  UI.user_error!("FIREBASE_APP_IOS is not set (Firebase console → Project settings → your iOS app → App ID)") if firebase_ios.to_s.strip.empty?
+  auth = firebase_auth_options
 
   # nil until the first release exists, so the very first deploy of a new
   # app starts from build 1 / version 1.0.x instead of crashing on nil[].
-  # The token is passed explicitly: this action otherwise reads FIREBASE_TOKEN,
-  # not the FIREBASE_CLI_TOKEN the rest of the platform uses.
-  latest_release = firebase_app_distribution_get_latest_release(
-    app: firebase_ios,
-    firebase_cli_token: firebase_cli_token
-  ) || {}
+  latest_release = firebase_app_distribution_get_latest_release(app: firebase_ios, **auth) || {}
   latest_build_number = latest_release[:buildVersion].to_i
   latest_version = latest_release[:displayVersion]
 
-  build_ios(version, bump, latest_build_number, latest_version)
+  build_ios(version, bump, latest_build_number, latest_version, default_export_method: "ad-hoc")
 
   firebase_app_distribution(
     app: firebase_ios,
     ipa_path: ios_ipa_path,
-    firebase_cli_token: firebase_cli_token
+    groups: env_list('FIREBASE_TESTER_GROUPS'),
+    testers: env_list('FIREBASE_TESTERS'),
+    release_notes: ENV['RELEASE_NOTES'],
+    **auth
   )
 
   UI.message("Successfully deployed IPA on Firebase App Distribution!")

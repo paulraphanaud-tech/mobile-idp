@@ -1,11 +1,44 @@
 # =============================================================================
 # Module: Android Build
-# Provides: build_android(version, bump)
-# Requires: common module (prepare_and_check, compute_next_version)
+# Provides: android_flavor, android_apk_path, build_android(version, bump)
+# Requires: common module (prepare_and_check, compute_next_version,
+#           firebase_auth_options, in_project_root)
+#
+# FLAVOR: unset means "prod" (unchanged default); set but *empty* means the
+# project has no flavors — the usual case for an app written in a chat — and
+# builds without --flavor.
+#
+# Signing: whatever android/app/build.gradle configures, unless
+# ANDROID_KEYSTORE_PATH is set, in which case the APK is re-signed with that
+# keystore (see android_resign_apk). The GitHub Actions workflows use this so
+# every build carries the same signature, whatever the Gradle config says —
+# testers can then install a new build over the previous one.
 # =============================================================================
 
+require 'shellwords'
+
+def android_flavor(default = 'prod')
+  return default unless ENV.key?('FLAVOR')
+  flavor = ENV['FLAVOR'].to_s.strip
+  flavor.empty? ? nil : flavor
+end
+
+def android_apk_path(flavor)
+  root = flutter_project_root
+  candidates = if flavor
+    ["build/app/outputs/flutter-apk/app-#{flavor}-release.apk",
+     "build/app/outputs/apk/#{flavor}/release/app-#{flavor}-release.apk"]
+  else
+    ["build/app/outputs/flutter-apk/app-release.apk",
+     "build/app/outputs/apk/release/app-release.apk"]
+  end
+  path = candidates.map { |c| File.join(root, c) }.find { |c| File.exist?(c) }
+  UI.user_error!("Release APK not found (looked for #{candidates.join(', ')})") unless path
+  path
+end
+
 def build_android(version, bump)
-  flavor = ENV['FLAVOR'] || 'prod'
+  flavor = android_flavor('prod')
   firebase_android = ENV['FIREBASE_APP_ANDROID']
   build_format = (ENV['BUILD_FORMAT'] || 'apk').downcase
 
@@ -14,7 +47,7 @@ def build_android(version, bump)
   begin
     latest_release = firebase_app_distribution_get_latest_release(
       app: firebase_android,
-      firebase_cli_token: ENV['FIREBASE_CLI_TOKEN']
+      **firebase_auth_options
     )
   rescue => ex
     UI.important("Could not fetch latest Firebase release: #{ex}")
@@ -25,12 +58,44 @@ def build_android(version, bump)
   latest_version = latest_release && latest_release[:displayVersion] ? latest_release[:displayVersion] : nil
 
   build_name, build_number = compute_next_version(version, bump, latest_build_number, latest_version)
+  flavor_arg = flavor ? " --flavor #{flavor}" : ""
+  version_args = " --build-name=#{build_name} --build-number=#{build_number}"
 
-  if build_format == 'aab'
-    sh("flutter build appbundle --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}#{dart_defines}")
-    UI.message("Successfully built AAB!")
-  else
-    sh("flutter build apk --release --flavor #{flavor} --build-name=#{build_name} --build-number=#{build_number}#{dart_defines}")
-    UI.message("Successfully built APK!")
+  # A bare `sh` runs from fastlane/, where flutter finds no pubspec.yaml.
+  in_project_root do
+    if build_format == 'aab'
+      sh("flutter build appbundle --release#{flavor_arg}#{version_args}#{dart_defines}")
+      UI.message("Successfully built AAB!")
+    else
+      sh("flutter build apk --release#{flavor_arg}#{version_args}#{dart_defines}")
+      UI.message("Successfully built APK!")
+    end
   end
+
+  android_resign_apk(android_apk_path(flavor)) if build_format != 'aab' && !ENV['ANDROID_KEYSTORE_PATH'].to_s.empty?
+end
+
+# Re-signs an APK in place with ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD
+# / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD. apksigner replaces every existing
+# signature (v1–v4), and Flutter's release APK is already zip-aligned, so no
+# zipalign pass is needed. Passwords go through the environment, never argv,
+# so they do not appear in the process list or the fastlane log.
+def android_resign_apk(apk)
+  keystore = ENV['ANDROID_KEYSTORE_PATH']
+  UI.user_error!("ANDROID_KEYSTORE_PATH does not exist: #{keystore}") unless File.file?(keystore)
+  %w[ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD].each do |k|
+    UI.user_error!("#{k} is required with ANDROID_KEYSTORE_PATH") if ENV[k].to_s.empty?
+  end
+
+  sdk = ENV['ANDROID_HOME'] || ENV['ANDROID_SDK_ROOT']
+  UI.user_error!("ANDROID_HOME is not set; cannot find apksigner") if sdk.to_s.empty?
+  apksigner = Dir.glob(File.join(sdk, 'build-tools', '*', 'apksigner'))
+                 .max_by { |p| Gem::Version.new(File.basename(File.dirname(p))) rescue Gem::Version.new('0') }
+  UI.user_error!("apksigner not found under #{sdk}/build-tools") unless apksigner
+
+  sh("#{apksigner.shellescape} sign --ks #{keystore.shellescape} " \
+     "--ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias #{ENV['ANDROID_KEY_ALIAS'].shellescape} " \
+     "--key-pass env:ANDROID_KEY_PASSWORD #{apk.shellescape}")
+  sh("#{apksigner.shellescape} verify --print-certs #{apk.shellescape} | head -3")
+  UI.success("Re-signed #{File.basename(apk)} with #{File.basename(keystore)}")
 end

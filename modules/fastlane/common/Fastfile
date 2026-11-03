@@ -115,3 +115,40 @@ def dart_defines
   UI.message("Dart defines: #{defines.map { |d| d.split('=').first(2).join('=') }.join(' ')}")
   " #{defines.join(' ')}"
 end
+
+# =============================================================================
+# Firebase App Distribution authentication
+#
+# Two ways to authenticate, picked by what the environment holds:
+#
+#   FIREBASE_SERVICE_CREDENTIALS_FILE  path to a service-account JSON key with
+#                                      the "Firebase App Distribution Admin"
+#                                      role. What the GitHub Actions workflows
+#                                      use: Google is retiring `firebase
+#                                      login:ci` tokens, and a service account
+#                                      is not tied to a person's Google login.
+#   FIREBASE_CLI_TOKEN                 a `firebase login:ci` refresh token.
+#                                      What CodeBuild stacks were set up with.
+#
+# The service account wins when both are set. Returned as a hash to splat into
+# firebase_app_distribution / firebase_app_distribution_get_latest_release.
+# =============================================================================
+def firebase_auth_options
+  file = ENV['FIREBASE_SERVICE_CREDENTIALS_FILE'].to_s.strip
+  unless file.empty?
+    UI.user_error!("FIREBASE_SERVICE_CREDENTIALS_FILE points at a missing file: #{file}") unless File.file?(file)
+    return { service_credentials_file: file }
+  end
+
+  token = ENV['FIREBASE_CLI_TOKEN'].to_s.strip
+  return { firebase_cli_token: token } unless token.empty?
+
+  UI.user_error!("No Firebase credentials: set FIREBASE_SERVICE_CREDENTIALS_FILE (service-account JSON) or FIREBASE_CLI_TOKEN")
+end
+
+# Comma-separated lists from the environment, nil when empty — the Firebase
+# action treats an empty string as "a group named ''" and fails the upload.
+def env_list(name)
+  value = ENV[name].to_s.split(',').map(&:strip).reject(&:empty?).join(',')
+  value.empty? ? nil : value
+end
