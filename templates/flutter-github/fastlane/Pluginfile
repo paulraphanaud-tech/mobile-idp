@@ -1,0 +1,2 @@
+# fastlane plugins — loaded by the Gemfile. Commit this file.
+gem 'fastlane-plugin-firebase_app_distribution'

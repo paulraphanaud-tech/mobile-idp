@@ -1,28 +1,35 @@
 # =============================================================================
 # Module: Android Deploy Firebase
 # Provides: deploy_android_to_app_distrib(version, bump)
-# Requires: android_build module (build_android)
+# Requires: common module (firebase_auth_options, env_list)
+#           android_build module (build_android, android_flavor, android_apk_path)
+#
+# ENV:
+#   FIREBASE_APP_ANDROID    Firebase Android app ID (1:123:android:abc)
+#   FIREBASE_TESTER_GROUPS  comma-separated group *aliases*; falls back to
+#                           APP_STORE_TESTER_GROUP, which CodeBuild stacks use
+#   FIREBASE_TESTERS        optional, comma-separated tester emails
 # =============================================================================
 
 def deploy_android_to_app_distrib(version, bump)
-  flavor = ENV['FLAVOR'] || 'dev'
   firebase_android = ENV['FIREBASE_APP_ANDROID']
-  firebase_cli_token = ENV['FIREBASE_CLI_TOKEN']
-  tester_group = ENV['APP_STORE_TESTER_GROUP']
+  UI.user_error!("FIREBASE_APP_ANDROID is not set (Firebase console > Project settings > your Android app > App ID)") if firebase_android.to_s.strip.empty?
+  flavor = android_flavor('dev')
 
+  ENV['BUILD_FORMAT'] = 'apk'
+  # build_android defaults an unset FLAVOR to prod; this function always
+  # defaulted it to dev. Make the two agree before building.
+  ENV['FLAVOR'] = flavor.to_s unless ENV.key?('FLAVOR')
   build_android(version, bump)
-
-  apk_path = "./build/app/outputs/flutter-apk/app-#{flavor}-release.apk"
-  unless File.exist?(apk_path)
-    apk_path = "./build/app/outputs/apk/#{flavor}/release/app-#{flavor}-release.apk"
-  end
 
   firebase_app_distribution(
     app: firebase_android,
     android_artifact_type: 'APK',
-    android_artifact_path: apk_path,
-    firebase_cli_token: firebase_cli_token,
-    groups: tester_group
+    android_artifact_path: android_apk_path(flavor),
+    groups: env_list('FIREBASE_TESTER_GROUPS') || env_list('APP_STORE_TESTER_GROUP'),
+    testers: env_list('FIREBASE_TESTERS'),
+    release_notes: ENV['RELEASE_NOTES'],
+    **firebase_auth_options
   )
 
   UI.message("Successfully deployed APK on Firebase App Distribution!")

@@ -30,12 +30,12 @@ It detects the `.xcodeproj`, the first shared scheme, the app's
 
 | File | Purpose |
 |---|---|
-| `fastlane/Fastfile` | Lanes `test`, `build_simulator`, `build`, `deploy_testflight`, `sync_certs`, `create_app`, importing the IDP modules from `.idp/modules` |
+| `fastlane/Fastfile` | Lanes `test`, `build_simulator`, `build`, `deploy_testflight`, `deploy_firebase`, `setup_signing`, `sync_certs`, `create_app`, importing the IDP modules from `.idp/modules` |
 | `fastlane/env.dev` | Non-secret config. Copy to `env.staging` / `env.prod` per environment. |
 | `fastlane/env.secret.example` | Template for local-only secrets |
 | `Gemfile`, `Makefile` | `make idp-fetch` clones the IDP into `.idp/` (gitignored) at the ref CI uses |
 | `.idp.env` | What was detected; read by the workflow generator |
-| `.github/workflows/*` | Via `scripts/generate-github-actions.sh` (`--workflows`, default `ci,preview`) |
+| `.github/workflows/*` | Via `scripts/generate-github-actions.sh` (`--workflows`, default `ci,preview,distribute,signing`) — distribution setup in `docs/github-distribution.md` |
 
 The IDP is **not vendored** into the app: CI checks out mobile-idp at
 `IDP_REF` (default `main`) into `.idp/`. Pin a tag for reproducibility.
@@ -49,5 +49,5 @@ on CI cannot see it. If its Test action has no test targets, generate CI with
 | Target | Tier |
 |---|---|
 | `make test`, `make build-simulator`, `make build-ios`, `make sync-certs*` | 1 |
-| `make deploy-ios-testflight` | 2 — build number consumed forever |
+| `make deploy-ios-testflight`, `make deploy-ios-firebase` | 2 — build number consumed forever |
 | `make create-app APP_NAME=…` | 3 — gated by `scripts/confirm.sh "create <bundle-id>"` |

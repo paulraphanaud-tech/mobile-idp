@@ -1,0 +1,92 @@
+fastlane_require 'dotenv'
+
+# =============================================================================
+# {{PROJECT_NAME}} — Flutter lanes for GitHub Actions distribution, generated
+# by mobile-idp scripts/bootstrap-flutter-github.sh
+#
+# The IDP modules are not vendored: the workflows check out mobile-idp at
+# {{IDP_REF}} into .idp/ next to this app (gitignored). Locally:
+#   git clone --depth 1 https://github.com/{{IDP_REPO}} .idp
+# =============================================================================
+before_all do
+  env_name = ENV['FASTLANE_ENV'] || 'dev'
+  env_file = "env.#{env_name}"
+  secret_file = 'env.secret'
+
+  if File.exist?(env_file)
+    Dotenv.overload env_file
+    UI.message("Env loaded from #{env_file}!")
+  else
+    UI.important("No fastlane/#{env_file}; copy fastlane/env.dev to create it.")
+  end
+
+  if File.exist?(secret_file)
+    Dotenv.overload secret_file
+    UI.message("Secrets loaded from #{secret_file}!")
+  elsif ENV['CI']
+    UI.message("CI detected: secrets come from the environment.")
+  end
+
+  # A temporary keychain for match on GitHub's macOS runners.
+  setup_ci if ENV['CI'] && RUBY_PLATFORM.include?('darwin')
+
+  if lane_context[SharedValues::PLATFORM_NAME] == :ios && ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'].to_s != ''
+    app_store_connect_api_key(
+      key_id: ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'],
+      issuer_id: ENV['APP_STORE_CONNECT_API_KEY_ISSUER_ID'],
+      key_content: ENV['APP_STORE_CONNECT_API_KEY_KEY'],
+      is_key_content_base64: ENV['APP_STORE_CONNECT_API_KEY_IS_KEY_CONTENT_BASE64'] == 'true',
+      in_house: false
+    )
+  end
+end
+
+default_platform(:ios)
+
+import "../{{MODULES_PATH}}/fastlane/common/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/android_build/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/android_deploy_firebase/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_build/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_deploy_firebase/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/ios_deploy_testflight/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/match/Fastfile"
+import "../{{MODULES_PATH}}/fastlane/produce/Fastfile"
+
+platform :android do
+  # Signed release APK, not uploaded.
+  lane :build do |options|
+    build_android(options[:version], options[:bump])
+  end
+
+  # Release APK → Firebase App Distribution (Tier 2).
+  lane :deploy_firebase do |options|
+    deploy_android_to_app_distrib(options[:version], options[:bump])
+  end
+end
+
+platform :ios do
+  # Signed IPA, not uploaded.
+  lane :build do |options|
+    build_ios(options[:version], options[:bump], nil, nil)
+  end
+
+  # App Store build → TestFlight (Tier 2 — the build number is consumed).
+  lane :deploy_testflight do |options|
+    deploy_ios_to_app_store_connect(options[:version], options[:bump])
+  end
+
+  # Ad-hoc build → Firebase App Distribution (registered devices only).
+  lane :deploy_firebase do |options|
+    deploy_ios_to_app_distrib(options[:version], options[:bump])
+  end
+
+  # One-time: bundle ID, devices, certificates and profiles (Tier 2 — creates
+  # Apple certificates). Run by .github/workflows/signing-setup.yml.
+  lane :setup_signing do |options|
+    setup_signing(options[:types], options[:devices])
+  end
+
+  lane :sync_certs do |options|
+    sync_certificates(options[:type], options[:readonly])
+  end
+end

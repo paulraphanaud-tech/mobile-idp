@@ -115,6 +115,12 @@ platform :ios do
     sync_certificates(options[:type], options[:readonly])
   end
 
+  # One-time: bundle ID, devices, certificates and profiles (Tier 2 — creates
+  # Apple certificates). Run by .github/workflows/signing-setup.yml.
+  lane :setup_signing do |options|
+    setup_signing(options[:types], options[:devices])
+  end
+
   lane :create_app do |options|
     create_app_on_asc(options[:name], options[:language])
   end

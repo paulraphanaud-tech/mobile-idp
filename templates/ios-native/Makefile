@@ -11,7 +11,7 @@ IDP_REPO ?= https://github.com/{{IDP_REPO}}.git
 IDP_REF ?= {{IDP_REF}}
 FASTLANE = FASTLANE_ENV=$(ENV) bundle exec fastlane
 
-.PHONY: idp-fetch install test build-simulator build-ios deploy-ios-testflight sync-certs sync-certs-appstore create-app help
+.PHONY: idp-fetch install test build-simulator build-ios deploy-ios-testflight deploy-ios-firebase sync-certs sync-certs-appstore create-app help
 
 idp-fetch: ## Fetch the IDP modules into {{MODULES_ROOT}}/ (same ref CI uses)
 	@if [ -d {{MODULES_ROOT}}/.git ]; then git -C {{MODULES_ROOT}} fetch --depth 1 origin $(IDP_REF) && git -C {{MODULES_ROOT}} checkout -q FETCH_HEAD; \
@@ -31,6 +31,9 @@ build-ios: ## Signed IPA, not uploaded — Tier 1
 
 deploy-ios-testflight: ## Upload to TestFlight — Tier 2 (build number consumed forever)
 	$(FASTLANE) ios deploy_testflight bump:$(BUMP)
+
+deploy-ios-firebase: ## Ad-hoc build to Firebase App Distribution — Tier 2
+	$(FASTLANE) ios deploy_firebase bump:$(BUMP)
 
 sync-certs: ## Match development certs, read-only
 	$(FASTLANE) ios sync_certs type:development readonly:true
