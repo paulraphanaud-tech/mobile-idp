@@ -5,13 +5,17 @@
 # =============================================================================
 
 def deploy_ios_to_app_distrib(version, bump)
-  flavor = ENV['FLAVOR']
   firebase_ios = ENV['FIREBASE_APP_IOS']
   firebase_cli_token = ENV['FIREBASE_CLI_TOKEN']
 
+  # nil until the first release exists, so the very first deploy of a new
+  # app starts from build 1 / version 1.0.x instead of crashing on nil[].
+  # The token is passed explicitly: this action otherwise reads FIREBASE_TOKEN,
+  # not the FIREBASE_CLI_TOKEN the rest of the platform uses.
   latest_release = firebase_app_distribution_get_latest_release(
-    app: firebase_ios
-  )
+    app: firebase_ios,
+    firebase_cli_token: firebase_cli_token
+  ) || {}
   latest_build_number = latest_release[:buildVersion].to_i
   latest_version = latest_release[:displayVersion]
 
@@ -19,7 +23,7 @@ def deploy_ios_to_app_distrib(version, bump)
 
   firebase_app_distribution(
     app: firebase_ios,
-    ipa_path: "build/ios/ipa/app-#{flavor}-release.ipa",
+    ipa_path: ios_ipa_path,
     firebase_cli_token: firebase_cli_token
   )
 

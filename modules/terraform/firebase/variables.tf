@@ -4,13 +4,15 @@ variable "gcp_project_id" {
 }
 
 variable "android_package_name" {
-  description = "Android application package name (e.g. com.example.app)"
+  description = "Android application package name (e.g. com.example.app). Empty string skips the Android app."
   type        = string
+  default     = ""
 }
 
 variable "ios_bundle_id" {
-  description = "iOS application bundle identifier (e.g. com.example.app)"
+  description = "iOS application bundle identifier (e.g. com.example.app). Empty string skips the iOS app."
   type        = string
+  default     = ""
 }
 
 variable "android_display_name" {
@@ -28,4 +30,5 @@ variable "ios_display_name" {
 variable "apple_team_id" {
   description = "Apple Developer Team ID associated with the iOS app"
   type        = string
+  default     = ""
 }
